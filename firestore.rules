@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function role() { return me().role; }
+    function isAdmin() { return signedIn() && role() == 'admin'; }
+    function canPostNews() { return signedIn() && role() in ['classRep', 'teacher', 'admin']; }
+    function canManageBooks() { return signedIn() && role() in ['teacher', 'admin']; }
+
+    // Profiles: anyone signed in can read; a user creates only their own
+    // profile and only as a student; only admins change roles.
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'student';
+      allow update: if isAdmin();
+    }
+
+    match /books/{id} {
+      allow read: if signedIn();
+      allow write: if canManageBooks();
+    }
+
+    match /news/{id} {
+      allow read: if signedIn();
+      allow create: if canPostNews()
+                    && (isAdmin() || request.resource.data.department == me().department);
+      allow delete: if canPostNews()
+                    && (isAdmin() || resource.data.department == me().department);
+    }
+
+    // Chat id is "<uidA>_<uidB>" (sorted); only participants may use it.
+    match /chats/{chatId}/messages/{msgId} {
+      allow read: if signedIn() && request.auth.uid in chatId.split('_');
+      allow create: if signedIn() && request.auth.uid in chatId.split('_')
+                    && request.resource.data.senderId == request.auth.uid;
+    }
+
+    match /bus/{doc} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
