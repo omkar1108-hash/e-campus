@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'firebase_options.dart';
 
 import 'app.dart';
 import 'services/backend.dart';
@@ -16,7 +17,9 @@ Future<void> main() async {
 /// still runs end to end.
 Future<Backend> _createBackend() async {
   try {
-    await Firebase.initializeApp().timeout(const Duration(seconds: 10));
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 10));
     return FirebaseBackend();
   } catch (e) {
     debugPrint('Firebase unavailable ($e) - running in demo mode.');
