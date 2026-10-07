@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -10,7 +8,7 @@ import '../models/chat_message.dart';
 import '../models/news_item.dart';
 import 'backend.dart';
 
-/// Production backend: Firebase Auth (phone OTP) + Cloud Firestore.
+/// Production backend: Firebase Auth (email + password) + Cloud Firestore.
 class FirebaseBackend implements Backend {
   FirebaseBackend({FirebaseAuth? auth, FirebaseFirestore? firestore})
     : _auth = auth ?? FirebaseAuth.instance,
@@ -27,84 +25,122 @@ class FirebaseBackend implements Backend {
 
   // ---- Auth -------------------------------------------------------------
   @override
-  Future<OtpSession> sendOtp(String phone) {
-    final completer = Completer<OtpSession>();
-    _auth.verifyPhoneNumber(
-      phoneNumber: phone,
-      timeout: const Duration(seconds: 60),
-      verificationCompleted: (credential) async {
-        // Android may auto-retrieve the SMS; sign in straight away.
-        try {
-          await _auth.signInWithCredential(credential);
-        } catch (_) {}
-      },
-      verificationFailed: (e) {
-        if (!completer.isCompleted) {
-          completer.completeError(
-            AuthException(e.message ?? 'Could not send OTP (${e.code})'),
-          );
-        }
-      },
-      codeSent: (verificationId, _) {
-        if (!completer.isCompleted) {
-          completer.complete(
-            OtpSession(phone: phone, verificationId: verificationId),
-          );
-        }
-      },
-      codeAutoRetrievalTimeout: (_) {},
-    );
-    return completer.future;
+  Future<void> signUp({
+    required String email,
+    required String password,
+    required String name,
+    required String department,
+  }) async {
+    try {
+      final cred = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final user = cred.user!;
+      try {
+        // New accounts are always students; an admin promotes them later.
+        await _users
+            .doc(user.uid)
+            .set(
+              AppUser(
+                uid: user.uid,
+                email: email,
+                name: name,
+                department: department,
+                role: UserRole.student,
+              ).toMap(),
+            );
+        await user.sendEmailVerification();
+      } catch (_) {
+        // Don't leave an account without a profile behind.
+        await user.delete();
+        rethrow;
+      }
+      await _auth.signOut();
+    } on FirebaseAuthException catch (e) {
+      throw AuthException(_authMessage(e));
+    }
   }
 
   @override
-  Future<AppUser?> verifyOtp(OtpSession session, String code) async {
+  Future<AppUser> signIn(String email, String password) async {
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: session.verificationId,
-        smsCode: code,
+      final cred = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
-      await _auth.signInWithCredential(credential);
+      final user = cred.user!;
+      await user.reload();
+      final fresh = _auth.currentUser ?? user;
+      if (!fresh.emailVerified) {
+        try {
+          await fresh.sendEmailVerification();
+        } catch (_) {}
+        await _auth.signOut();
+        throw AuthException(
+          'Your email is not verified yet. We sent a new verification link '
+          'to $email - open it, then sign in again.',
+        );
+      }
+      final profile = await _profileOf(fresh.uid);
+      if (profile == null) {
+        await _auth.signOut();
+        throw const AuthException(
+          'No profile found for this account. Please contact an administrator.',
+        );
+      }
+      return profile;
     } on FirebaseAuthException catch (e) {
-      throw AuthException(
-        e.code == 'invalid-verification-code'
-            ? 'Incorrect OTP. Please try again.'
-            : e.message ?? 'Verification failed',
-      );
+      throw AuthException(_authMessage(e));
     }
-    return restoreSession();
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+    } on FirebaseAuthException catch (e) {
+      throw AuthException(_authMessage(e));
+    }
   }
 
   @override
   Future<AppUser?> restoreSession() async {
     final user = _auth.currentUser;
-    if (user == null) return null;
-    final doc = await _users.doc(user.uid).get();
-    if (!doc.exists) return null;
-    return AppUser.fromMap(user.uid, doc.data()!);
+    if (user == null || !user.emailVerified) return null;
+    return _profileOf(user.uid);
   }
 
-  @override
-  Future<AppUser> registerProfile({
-    required String name,
-    required String department,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null) throw const AuthException('Not signed in');
-    // New accounts are always students; an admin promotes them later.
-    final profile = AppUser(
-      uid: user.uid,
-      phone: user.phoneNumber ?? '',
-      name: name,
-      department: department,
-      role: UserRole.student,
-    );
-    await _users.doc(user.uid).set(profile.toMap());
-    return profile;
+  Future<AppUser?> _profileOf(String uid) async {
+    final doc = await _users.doc(uid).get();
+    return doc.exists ? AppUser.fromMap(uid, doc.data()!) : null;
   }
 
   @override
   Future<void> signOut() => _auth.signOut();
+
+  static String _authMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'invalid-email':
+        return 'That email address is not valid.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Incorrect email or password.';
+      case 'email-already-in-use':
+        return 'An account with this email already exists.';
+      case 'weak-password':
+        return 'Password is too weak - use at least 6 characters.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a few minutes and try again.';
+      case 'network-request-failed':
+        return 'No internet connection.';
+      default:
+        return e.message ?? 'Authentication failed (${e.code}).';
+    }
+  }
 
   // ---- Users ------------------------------------------------------------
   @override

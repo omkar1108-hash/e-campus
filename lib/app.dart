@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/register_screen.dart';
 import 'services/auth_controller.dart';
 import 'services/backend.dart';
 import 'services/chatbot_service.dart';
@@ -51,8 +50,6 @@ class _AuthGate extends StatelessWidget {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       case AuthStatus.signedOut:
         return const LoginScreen();
-      case AuthStatus.needsProfile:
-        return const RegisterScreen();
       case AuthStatus.signedIn:
         return const HomeScreen();
     }

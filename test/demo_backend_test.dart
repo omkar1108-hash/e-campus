@@ -11,22 +11,38 @@ void main() {
   setUp(() => backend = DemoBackend());
   tearDown(() => backend.dispose());
 
-  test('rejects wrong OTP, accepts demo OTP for known user', () async {
-    final s = await backend.sendOtp('+919000000002');
-    expect(() => backend.verifyOtp(s, '000000'), throwsA(isA<AuthException>()));
-    final user = await backend.verifyOtp(s, DemoBackend.demoOtp);
-    expect(user?.role, UserRole.teacher);
+  test('rejects wrong password, accepts demo password', () async {
+    expect(
+      () => backend.signIn('teacher@ecampus.demo', 'nope'),
+      throwsA(isA<AuthException>()),
+    );
+    final user = await backend.signIn(
+      'teacher@ecampus.demo',
+      DemoBackend.demoPassword,
+    );
+    expect(user.role, UserRole.teacher);
+    expect((await backend.restoreSession())?.uid, user.uid);
   });
 
-  test('unknown number needs registration and becomes a student', () async {
-    final s = await backend.sendOtp('+919111111111');
-    expect(await backend.verifyOtp(s, DemoBackend.demoOtp), isNull);
-    final user = await backend.registerProfile(
+  test('sign up creates a student and rejects duplicate email', () async {
+    await backend.signUp(
+      email: 'New@Kid.com',
+      password: 'secret1',
       name: 'New Kid',
       department: 'MBA',
     );
+    final user = await backend.signIn('new@kid.com', 'secret1');
     expect(user.role, UserRole.student);
-    expect((await backend.restoreSession())?.name, 'New Kid');
+    expect(user.department, 'MBA');
+    expect(
+      () => backend.signUp(
+        email: 'new@kid.com',
+        password: 'x12345',
+        name: 'Dup',
+        department: 'MBA',
+      ),
+      throwsA(isA<AuthException>()),
+    );
     await backend.signOut();
     expect(await backend.restoreSession(), isNull);
   });

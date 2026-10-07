@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 AppUser _u(UserRole r, {String dept = 'MCA'}) => AppUser(
   uid: r.name,
-  phone: '+910000000000',
+  email: 'x@y.z',
   name: r.name,
   department: dept,
   role: r,

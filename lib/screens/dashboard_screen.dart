@@ -31,7 +31,7 @@ class DashboardScreen extends StatelessWidget {
       children: [
         Text('Welcome, ${user.name}', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 4),
-        Text('${user.role.label} · ${user.department} · ${user.phone}'),
+        Text('${user.role.label} · ${user.department} · ${user.email}'),
         const SizedBox(height: 24),
         Text('What you can do', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
