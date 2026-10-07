@@ -18,18 +18,16 @@ class BotTurn {
   final String text;
 }
 
-/// AI doubt-clearing assistant backed by the OpenAI (ChatGPT) API.
+/// AI doubt-clearing assistant backed by the Google Gemini API.
 class ChatbotService {
-  ChatbotService({http.Client? client, String? apiKey})
+  ChatbotService({http.Client? client, String? apiKey, String? model})
     : _client = client ?? http.Client(),
-      _apiKey = apiKey ?? AppConfig.openAiApiKey;
+      _apiKey = apiKey ?? AppConfig.geminiApiKey,
+      _model = model ?? AppConfig.geminiModel;
 
   final http.Client _client;
   final String _apiKey;
-
-  static final _endpoint = Uri.parse(
-    'https://api.openai.com/v1/chat/completions',
-  );
+  final String _model;
 
   static const _systemPrompt =
       'You are E-Campus Assistant, a friendly tutor for college students. '
@@ -43,30 +41,41 @@ class ChatbotService {
     if (!isConfigured) {
       throw const ChatbotException(
         'The AI chatbot is not configured. Run the app with '
-        '--dart-define=OPENAI_API_KEY=<your key>.',
+        '--dart-define=GEMINI_API_KEY=<your key>.',
       );
     }
 
-    final messages = [
-      {'role': 'system', 'content': _systemPrompt},
-      for (final t in history)
-        {'role': t.fromUser ? 'user' : 'assistant', 'content': t.text},
-    ];
+    final uri = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/'
+      '$_model:generateContent',
+    );
+    final body = jsonEncode({
+      'systemInstruction': {
+        'parts': [
+          {'text': _systemPrompt},
+        ],
+      },
+      'contents': [
+        for (final t in history)
+          {
+            'role': t.fromUser ? 'user' : 'model',
+            'parts': [
+              {'text': t.text},
+            ],
+          },
+      ],
+    });
 
     final http.Response res;
     try {
       res = await _client
           .post(
-            _endpoint,
+            uri,
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': 'Bearer $_apiKey',
+              'x-goog-api-key': _apiKey,
             },
-            body: jsonEncode({
-              'model': AppConfig.openAiModel,
-              'messages': messages,
-              'temperature': 0.5,
-            }),
+            body: body,
           )
           .timeout(const Duration(seconds: 45));
     } catch (_) {
@@ -75,15 +84,31 @@ class ChatbotService {
       );
     }
 
-    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final Map<String, dynamic> json;
+    try {
+      json = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    } catch (_) {
+      throw ChatbotException('AI service error: HTTP ${res.statusCode}');
+    }
     if (res.statusCode != 200) {
-      final err = (body['error'] as Map<String, dynamic>?)?['message'];
+      final err = (json['error'] as Map<String, dynamic>?)?['message'];
       throw ChatbotException('AI service error: ${err ?? res.statusCode}');
     }
-    final choices = body['choices'] as List<dynamic>;
-    final content =
-        (choices.first as Map<String, dynamic>)['message']
-            as Map<String, dynamic>;
-    return (content['content'] as String).trim();
+
+    final candidates = json['candidates'] as List<dynamic>?;
+    final parts =
+        ((candidates?.firstOrNull as Map<String, dynamic>?)?['content']
+                as Map<String, dynamic>?)?['parts']
+            as List<dynamic>?;
+    final text = parts
+        ?.map((p) => (p as Map<String, dynamic>)['text'] ?? '')
+        .join()
+        .trim();
+    if (text == null || text.isEmpty) {
+      throw const ChatbotException(
+        'The AI did not return an answer. Try rephrasing your question.',
+      );
+    }
+    return text;
   }
 }

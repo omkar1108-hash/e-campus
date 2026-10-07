@@ -13,7 +13,7 @@ class representatives, teachers and administrators.
 | E-Library | Search, read/download books (link-based); teachers/admins add and remove books |
 | Bus tracking | Live bus marker on Google Maps; admin shares phone GPS as the bus position |
 | Chat | One-to-one chat with teachers and friends (Cloud Firestore, real time) |
-| AI chatbot | Doubt-clearing assistant using the OpenAI ChatGPT API |
+| AI chatbot | Doubt-clearing assistant using the Google Gemini API |
 | Tech news | Class reps/teachers/admins post news; students see their own department's news |
 
 ### Permission matrix
@@ -40,7 +40,7 @@ Demo accounts (password `demo1234`): `admin@ecampus.demo`,
 `teacher@ecampus.demo`, `rep@ecampus.demo`, `student@ecampus.demo`. New
 sign-ups in demo mode are created as students and are usable immediately.
 
-## Production setup (Firebase, Maps, ChatGPT)
+## Production setup (Firebase, Maps, Gemini)
 
 1. **Firebase** - create a project, enable *Authentication -> Email/Password*
    and create a *Cloud Firestore* database. Run
@@ -53,8 +53,8 @@ sign-ups in demo mode are created as students and are usable immediately.
 2. **Google Maps** – enable *Maps SDK for Android*, then put the key in
    `android/local.properties`:
    `MAPS_API_KEY=your_key`
-3. **ChatGPT** – run with your OpenAI key (never commit it):
-   `flutter run --dart-define=OPENAI_API_KEY=sk-... [--dart-define=OPENAI_MODEL=gpt-4o-mini]`
+3. **Gemini chatbot** - get a free key at Google AI Studio and run with
+   `flutter run --dart-define=GEMINI_API_KEY=AIza... [--dart-define=GEMINI_MODEL=gemini-2.5-flash]`
 
 ## Project structure
 
@@ -62,14 +62,14 @@ sign-ups in demo mode are created as students and are usable immediately.
 lib/
   main.dart                 Picks Firebase or demo backend
   app.dart                  Providers, theme, auth gate
-  config/app_config.dart    Departments, OpenAI settings
+  config/app_config.dart    Departments, Gemini settings
   models/                   AppUser (+roles), Book, NewsItem, ChatMessage, BusLocation
   services/
     backend.dart            Data-source interface
     firebase_backend.dart   Firebase Auth + Firestore implementation
     demo_backend.dart       In-memory implementation
     auth_controller.dart    Sign-in / sign-up state
-    chatbot_service.dart    OpenAI chat completions client
+    chatbot_service.dart    Gemini API client
   screens/                  login, otp, register, home (drawer), dashboard,
                             library, bus, people, chat, chatbot, news, users admin
   utils/rbac.dart           Permission rules
