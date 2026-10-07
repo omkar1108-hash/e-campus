@@ -1,14 +1,16 @@
 /// Runtime configuration.
 ///
 /// Secrets are injected at build time so they never get committed:
-///   flutter run --dart-define=OPENAI_API_KEY=sk-...
+///   flutter run --dart-define=GEMINI_API_KEY=AIza...
 class AppConfig {
   const AppConfig._();
 
-  static const openAiApiKey = String.fromEnvironment('OPENAI_API_KEY');
-  static const openAiModel = String.fromEnvironment(
-    'OPENAI_MODEL',
-    defaultValue: 'gpt-4o-mini',
+  static const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+
+  /// Override with --dart-define=GEMINI_MODEL=... if Google renames models.
+  static const geminiModel = String.fromEnvironment(
+    'GEMINI_MODEL',
+    defaultValue: 'gemini-2.5-flash',
   );
 
   static const departments = <String>[

@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/chatbot_service.dart';
 
-/// AI doubt-clearing assistant (ChatGPT API).
+/// AI doubt-clearing assistant (Gemini API).
 class ChatbotScreen extends StatefulWidget {
   const ChatbotScreen({super.key});
 
