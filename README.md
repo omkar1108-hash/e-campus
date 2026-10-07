@@ -68,7 +68,7 @@ lib/
     backend.dart            Data-source interface
     firebase_backend.dart   Firebase Auth + Firestore implementation
     demo_backend.dart       In-memory implementation
-    auth_controller.dart    Login → OTP → register state machine
+    auth_controller.dart    Sign-in / sign-up state
     chatbot_service.dart    OpenAI chat completions client
   screens/                  login, otp, register, home (drawer), dashboard,
                             library, bus, people, chat, chatbot, news, users admin
