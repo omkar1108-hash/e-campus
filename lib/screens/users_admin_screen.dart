@@ -31,7 +31,7 @@ class UsersAdminScreen extends StatelessWidget {
                 child: Text(u.name.isEmpty ? '?' : u.name[0]),
               ),
               title: Text(u.name),
-              subtitle: Text('${u.phone} · ${u.department}'),
+              subtitle: Text('${u.email} · ${u.department}'),
               trailing: DropdownButton<UserRole>(
                 value: u.role,
                 // An admin cannot demote themselves and lock everyone out.

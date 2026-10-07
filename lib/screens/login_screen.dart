@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_controller.dart';
 import '../services/backend.dart';
 import '../services/demo_backend.dart';
-import 'otp_screen.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,29 +15,47 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _phone = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
   bool _busy = false;
+  bool _obscure = true;
 
   @override
   void dispose() {
-    _phone.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
-  Future<void> _sendOtp() async {
+  void _toast(String message) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthController>();
-    final nav = Navigator.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
-      final session = await auth.sendOtp('+91${_phone.text.trim()}');
-      if (!mounted) return;
-      nav.push(MaterialPageRoute(builder: (_) => OtpScreen(session: session)));
+      await auth.signIn(_email.text, _password.text);
     } on AuthException catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) _toast(e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _email.text.trim();
+    if (!email.contains('@')) {
+      _toast('Enter your email above first');
+      return;
+    }
+    final auth = context.read<AuthController>();
+    try {
+      await auth.sendPasswordReset(email);
+      if (mounted) _toast('If that account exists, a reset link was sent.');
+    } on AuthException catch (e) {
+      if (mounted) _toast(e.message);
     }
   }
 
@@ -70,29 +88,59 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 32),
                   TextFormField(
-                    controller: _phone,
-                    keyboardType: TextInputType.phone,
-                    maxLength: 10,
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
                     decoration: const InputDecoration(
-                      labelText: 'Mobile number',
-                      prefixText: '+91 ',
-                      prefixIcon: Icon(Icons.phone),
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email),
+                    ),
+                    validator: (v) => (v ?? '').trim().contains('@')
+                        ? null
+                        : 'Enter a valid email address',
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _password,
+                    obscureText: _obscure,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: const Icon(Icons.lock),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscure ? Icons.visibility : Icons.visibility_off,
+                        ),
+                        onPressed: () => setState(() => _obscure = !_obscure),
+                      ),
                     ),
                     validator: (v) =>
-                        RegExp(r'^\d{10}$').hasMatch(v?.trim() ?? '')
-                        ? null
-                        : 'Enter a valid 10-digit mobile number',
+                        (v ?? '').isEmpty ? 'Enter your password' : null,
+                    onFieldSubmitted: (_) => _signIn(),
                   ),
-                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _forgotPassword,
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
                   FilledButton(
-                    onPressed: _busy ? null : _sendOtp,
+                    onPressed: _busy ? null : _signIn,
                     child: _busy
                         ? const SizedBox(
                             height: 20,
                             width: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Send OTP'),
+                        : const Text('Sign in'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                    ),
+                    child: const Text('Create an account'),
                   ),
                   if (isDemo) ...[
                     const SizedBox(height: 24),
@@ -102,12 +150,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         padding: EdgeInsets.all(12),
                         child: Text(
                           'Demo mode (Firebase not configured)\n'
-                          'OTP for every number: ${DemoBackend.demoOtp}\n\n'
-                          '9000000001 - Admin\n'
-                          '9000000002 - Teacher\n'
-                          '9000000003 - Class Representative\n'
-                          '9000000004 - Student\n'
-                          'Any other number registers as a new student.',
+                          'Password for every demo account: '
+                          '${DemoBackend.demoPassword}\n\n'
+                          'admin@ecampus.demo - Admin\n'
+                          'teacher@ecampus.demo - Teacher\n'
+                          'rep@ecampus.demo - Class Representative\n'
+                          'student@ecampus.demo - Student',
                         ),
                       ),
                     ),

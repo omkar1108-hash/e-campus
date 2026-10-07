@@ -17,14 +17,14 @@ enum UserRole {
 class AppUser {
   const AppUser({
     required this.uid,
-    required this.phone,
+    required this.email,
     required this.name,
     required this.department,
     required this.role,
   });
 
   final String uid;
-  final String phone;
+  final String email;
   final String name;
   final String department;
   final UserRole role;
@@ -32,14 +32,14 @@ class AppUser {
   AppUser copyWith({String? name, String? department, UserRole? role}) =>
       AppUser(
         uid: uid,
-        phone: phone,
+        email: email,
         name: name ?? this.name,
         department: department ?? this.department,
         role: role ?? this.role,
       );
 
   Map<String, dynamic> toMap() => {
-    'phone': phone,
+    'email': email,
     'name': name,
     'department': department,
     'role': role.name,
@@ -47,7 +47,7 @@ class AppUser {
 
   factory AppUser.fromMap(String uid, Map<String, dynamic> map) => AppUser(
     uid: uid,
-    phone: (map['phone'] ?? '') as String,
+    email: (map['email'] ?? '') as String,
     name: (map['name'] ?? '') as String,
     department: (map['department'] ?? '') as String,
     role: UserRole.fromName(map['role'] as String?),

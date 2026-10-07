@@ -7,7 +7,7 @@ class representatives, teachers and administrators.
 
 | Feature | Details |
 |---|---|
-| OTP login & registration | Firebase phone authentication; first-time numbers complete a short profile (name, department) |
+| Email login & registration | Firebase email + password with a verification link; sign-up collects name and department |
 | Role-Based Access Control | `student`, `classRep`, `teacher`, `admin`. Permission matrix in `lib/utils/rbac.dart`, mirrored server-side in `firestore.rules` |
 | Role-aware drawer | Menu entries are generated from the user's role (e.g. *Manage Users* only for admins) |
 | E-Library | Search, read/download books (link-based); teachers/admins add and remove books |
@@ -36,23 +36,20 @@ flutter pub get
 flutter run
 ```
 
-Demo OTP is always **123456**. Accounts: `9000000001` Admin,
-`9000000002` Teacher, `9000000003` Class Rep, `9000000004` Student; any other
-number registers as a new student.
+Demo accounts (password `demo1234`): `admin@ecampus.demo`,
+`teacher@ecampus.demo`, `rep@ecampus.demo`, `student@ecampus.demo`. New
+sign-ups in demo mode are created as students and are usable immediately.
 
 ## Production setup (Firebase, Maps, ChatGPT)
 
-1. **Firebase** – create a project, add an Android app with package
-   `com.example.e_campus`, add your SHA-1/SHA-256 debug fingerprints, enable
-   *Authentication → Phone* and create a *Cloud Firestore* database. Download
-   `google-services.json` into `android/app/` (git-ignored). The Gradle
-   plugin is applied automatically once the file exists.
-   - Deploy `firestore.rules` (Firebase console → Firestore → Rules).
-   - For testing, add a fixed test phone number + code under
-     *Authentication → Sign-in method → Phone → Phone numbers for testing*.
-   - **First admin:** register once in the app, then in the Firestore console
-     set that user's `users/<uid>.role` to `admin`. Admins can then promote
-     others from *Manage Users*.
+1. **Firebase** - create a project, enable *Authentication -> Email/Password*
+   and create a *Cloud Firestore* database. Run
+   `dart pub global run flutterfire_cli:flutterfire configure` to generate
+   `lib/firebase_options.dart` (required to build; commit it).
+   - Publish `firestore.rules` (Firestore -> Rules).
+   - **First admin:** register once in the app and verify the email, then in the
+     Firestore console set that user's `users/<uid>.role` to `admin`. Admins can
+     then promote others from *Manage Users*.
 2. **Google Maps** – enable *Maps SDK for Android*, then put the key in
    `android/local.properties`:
    `MAPS_API_KEY=your_key`

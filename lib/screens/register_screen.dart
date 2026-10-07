@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 
 import '../config/app_config.dart';
 import '../services/auth_controller.dart';
+import '../services/backend.dart';
 
-/// Shown after OTP verification for a phone number with no profile yet.
+/// Create an account. A verification email is sent; the user must open the
+/// link before they can sign in.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -15,40 +17,66 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
   String _department = AppConfig.departments.first;
   bool _busy = false;
+  bool _obscure = true;
 
   @override
   void dispose() {
     _name.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AuthController>();
+    final isDemo = context.read<Backend>().isDemo;
+    final nav = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
-      await auth.register(name: _name.text.trim(), department: _department);
+      await auth.signUp(
+        email: _email.text,
+        password: _password.text,
+        name: _name.text.trim(),
+        department: _department,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(
+            isDemo
+                ? 'Account created. You can sign in now.'
+                : 'Account created. We sent a verification link to '
+                      '${_email.text.trim()} - open it, then sign in.',
+          ),
+        ),
+      );
+      nav.pop();
+    } on AuthException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Registration failed: $e')));
-      setState(() => _busy = false);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Registration failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Complete registration')),
+      appBar: AppBar(title: const Text('Create account')),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            const Text('Phone verified. Tell us a bit about yourself.'),
-            const SizedBox(height: 16),
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
@@ -58,6 +86,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               validator: (v) =>
                   (v == null || v.trim().length < 2) ? 'Enter your name' : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email),
+              ),
+              validator: (v) => (v ?? '').trim().contains('@')
+                  ? null
+                  : 'Enter a valid email address',
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _password,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: 'Password (min 6 characters)',
+                prefixIcon: const Icon(Icons.lock),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscure ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+              ),
+              validator: (v) =>
+                  (v ?? '').length < 6 ? 'Use at least 6 characters' : null,
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(

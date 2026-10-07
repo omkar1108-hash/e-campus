@@ -4,13 +4,6 @@ import '../models/bus_location.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
 
-/// Handle for an OTP that has been sent and is waiting to be verified.
-class OtpSession {
-  const OtpSession({required this.phone, required this.verificationId});
-  final String phone;
-  final String verificationId;
-}
-
 class AuthException implements Exception {
   const AuthException(this.message);
   final String message;
@@ -25,19 +18,23 @@ abstract class Backend {
   bool get isDemo;
 
   // ---- Auth -------------------------------------------------------------
-  Future<OtpSession> sendOtp(String phone);
-
-  /// Signs in with the OTP. Returns the stored profile, or null when this
-  /// phone number has not completed registration yet.
-  Future<AppUser?> verifyOtp(OtpSession session, String code);
-
-  /// Profile of the signed-in user (restores session on app start).
-  Future<AppUser?> restoreSession();
-
-  Future<AppUser> registerProfile({
+  /// Creates the account and its student profile, then sends a verification
+  /// email. The user is signed out afterwards and must verify before logging in.
+  Future<void> signUp({
+    required String email,
+    required String password,
     required String name,
     required String department,
   });
+
+  /// Signs in and returns the profile. Throws [AuthException] for bad
+  /// credentials or an unverified email.
+  Future<AppUser> signIn(String email, String password);
+
+  Future<void> sendPasswordReset(String email);
+
+  /// Profile of the signed-in user (restores session on app start).
+  Future<AppUser?> restoreSession();
 
   Future<void> signOut();
 

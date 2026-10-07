@@ -9,19 +9,20 @@ import 'backend.dart';
 
 /// In-memory backend so the app can be demoed without Firebase.
 ///
-/// Demo accounts (OTP is always [demoOtp]):
-///   9000000001 Admin · 9000000002 Teacher · 9000000003 Class Rep ·
-///   9000000004 Student. Any other number registers as a new student.
+/// Demo accounts (password is always [demoPassword]):
+///   admin@ecampus.demo · teacher@ecampus.demo · rep@ecampus.demo ·
+///   student@ecampus.demo. New sign-ups are created as verified students.
 class DemoBackend implements Backend {
   DemoBackend({bool simulateBus = true}) {
     _seed();
     if (simulateBus) _startBusSimulation();
   }
 
-  static const demoOtp = '123456';
+  static const demoPassword = 'demo1234';
 
   final Map<String, AppUser> _usersByUid = {};
-  final Map<String, String> _uidByPhone = {};
+  final Map<String, String> _uidByEmail = {};
+  final Map<String, String> _passwords = {};
   final List<Book> _books = [];
   final List<NewsItem> _news = [];
   final Map<String, List<ChatMessage>> _chats = {};
@@ -34,7 +35,6 @@ class DemoBackend implements Backend {
   final _busCtl = StreamController<BusLocation?>.broadcast();
 
   String? _signedInUid;
-  String? _pendingPhone;
   int _idCounter = 0;
   String _nextId() => 'd${_idCounter++}';
 
@@ -42,23 +42,30 @@ class DemoBackend implements Backend {
   bool get isDemo => true;
 
   void _seed() {
-    void user(String uid, String phone, String name, String dept, UserRole r) {
+    void user(String uid, String email, String name, String dept, UserRole r) {
       _usersByUid[uid] = AppUser(
         uid: uid,
-        phone: phone,
+        email: email,
         name: name,
         department: dept,
         role: r,
       );
-      _uidByPhone[phone] = uid;
+      _uidByEmail[email] = uid;
+      _passwords[uid] = demoPassword;
     }
 
-    user('u-admin', '+919000000001', 'Asha Admin', 'MCA', UserRole.admin);
-    user('u-teacher', '+919000000002', 'Prof. Rao', 'MCA', UserRole.teacher);
-    user('u-rep', '+919000000003', 'Ravi (CR)', 'MCA', UserRole.classRep);
+    user('u-admin', 'admin@ecampus.demo', 'Asha Admin', 'MCA', UserRole.admin);
+    user(
+      'u-teacher',
+      'teacher@ecampus.demo',
+      'Prof. Rao',
+      'MCA',
+      UserRole.teacher,
+    );
+    user('u-rep', 'rep@ecampus.demo', 'Ravi (CR)', 'MCA', UserRole.classRep);
     user(
       'u-student',
-      '+919000000004',
+      'student@ecampus.demo',
       'Sneha Student',
       'MCA',
       UserRole.student,
@@ -148,51 +155,47 @@ class DemoBackend implements Backend {
 
   // ---- Auth -------------------------------------------------------------
   @override
-  Future<OtpSession> sendOtp(String phone) async {
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    _pendingPhone = phone;
-    return OtpSession(phone: phone, verificationId: 'demo');
-  }
-
-  @override
-  Future<AppUser?> verifyOtp(OtpSession session, String code) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (code != demoOtp) {
-      throw const AuthException('Incorrect OTP. Demo OTP is $demoOtp.');
-    }
-    final uid = _uidByPhone[session.phone];
-    if (uid == null) {
-      _signedInUid = 'pending-${session.phone}';
-      return null;
-    }
-    _signedInUid = uid;
-    return _usersByUid[uid];
-  }
-
-  @override
-  Future<AppUser?> restoreSession() async =>
-      _signedInUid == null ? null : _usersByUid[_signedInUid];
-
-  @override
-  Future<AppUser> registerProfile({
+  Future<void> signUp({
+    required String email,
+    required String password,
     required String name,
     required String department,
   }) async {
-    final phone = _pendingPhone ?? '';
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final key = email.trim().toLowerCase();
+    if (_uidByEmail.containsKey(key)) {
+      throw const AuthException('An account with this email already exists.');
+    }
     final uid = 'u-${_nextId()}';
-    final user = AppUser(
+    _usersByUid[uid] = AppUser(
       uid: uid,
-      phone: phone,
+      email: key,
       name: name,
       department: department,
       role: UserRole.student,
     );
-    _usersByUid[uid] = user;
-    _uidByPhone[phone] = uid;
-    _signedInUid = uid;
+    _uidByEmail[key] = uid;
+    _passwords[uid] = password;
     _usersCtl.add(null);
-    return user;
   }
+
+  @override
+  Future<AppUser> signIn(String email, String password) async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final uid = _uidByEmail[email.trim().toLowerCase()];
+    if (uid == null || _passwords[uid] != password) {
+      throw const AuthException('Incorrect email or password.');
+    }
+    _signedInUid = uid;
+    return _usersByUid[uid]!;
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) async {}
+
+  @override
+  Future<AppUser?> restoreSession() async =>
+      _signedInUid == null ? null : _usersByUid[_signedInUid];
 
   @override
   Future<void> signOut() async => _signedInUid = null;
