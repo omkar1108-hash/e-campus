@@ -10,7 +10,7 @@ class AppConfig {
   /// Override with --dart-define=GEMINI_MODEL=... if Google renames models.
   static const geminiModel = String.fromEnvironment(
     'GEMINI_MODEL',
-    defaultValue: 'gemini-2.5-flash',
+    defaultValue: 'gemini-3.8-flash',
   );
 
   static const departments = <String>[

@@ -63,7 +63,7 @@ Demo accounts (password `demo1234`): `admin@`, `staff@`, `library@`,
    `android/local.properties`:
    `MAPS_API_KEY=your_key`
 3. **Gemini chatbot** - get a free key at Google AI Studio and run with
-   `flutter run --dart-define=GEMINI_API_KEY=AIza... [--dart-define=GEMINI_MODEL=gemini-2.5-flash]`
+   `flutter run --dart-define=GEMINI_API_KEY=AIza... [--dart-define=GEMINI_MODEL=gemini-3.8-flash]`
 
 ## Project structure
 
