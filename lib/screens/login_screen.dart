@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../services/auth_controller.dart';
 import '../services/backend.dart';
 import '../services/demo_backend.dart';
-import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -135,12 +134,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           )
                         : const Text('Sign in'),
                   ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                    ),
-                    child: const Text('Create an account'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Accounts are created by your college administrator. '
+                    'You will receive an email to set your password.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12),
                   ),
                   if (isDemo) ...[
                     const SizedBox(height: 24),
@@ -152,10 +151,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           'Demo mode (Firebase not configured)\n'
                           'Password for every demo account: '
                           '${DemoBackend.demoPassword}\n\n'
-                          'admin@ecampus.demo - Admin\n'
-                          'teacher@ecampus.demo - Teacher\n'
-                          'rep@ecampus.demo - Class Representative\n'
-                          'student@ecampus.demo - Student',
+                          'admin@ / staff@ / library@ / teacher@ /\n'
+                          'rep@ / student@ / driver@  ecampus.demo',
                         ),
                       ),
                     ),

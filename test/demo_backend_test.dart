@@ -12,7 +12,7 @@ void main() {
   tearDown(() => backend.dispose());
 
   test('rejects wrong password, accepts demo password', () async {
-    expect(
+    await expectLater(
       () => backend.signIn('teacher@ecampus.demo', 'nope'),
       throwsA(isA<AuthException>()),
     );
@@ -24,27 +24,62 @@ void main() {
     expect((await backend.restoreSession())?.uid, user.uid);
   });
 
-  test('sign up creates a student and rejects duplicate email', () async {
-    await backend.signUp(
+  test('created accounts can sign in and duplicates are rejected', () async {
+    await backend.createAccount(
       email: 'New@Kid.com',
-      password: 'secret1',
       name: 'New Kid',
       department: 'MBA',
+      role: UserRole.libraryStaff,
     );
-    final user = await backend.signIn('new@kid.com', 'secret1');
-    expect(user.role, UserRole.student);
+    final user = await backend.signIn('new@kid.com', DemoBackend.demoPassword);
+    expect(user.role, UserRole.libraryStaff);
     expect(user.department, 'MBA');
-    expect(
-      () => backend.signUp(
+    await expectLater(
+      () => backend.createAccount(
         email: 'new@kid.com',
-        password: 'x12345',
         name: 'Dup',
         department: 'MBA',
+        role: UserRole.student,
       ),
       throwsA(isA<AuthException>()),
     );
     await backend.signOut();
     expect(await backend.restoreSession(), isNull);
+  });
+
+  test('a disabled account cannot sign in until re-enabled', () async {
+    await backend.setUserActive('u-student', false);
+    await expectLater(
+      () => backend.signIn('student@ecampus.demo', DemoBackend.demoPassword),
+      throwsA(isA<AuthException>()),
+    );
+    await backend.setUserActive('u-student', true);
+    final u = await backend.signIn(
+      'student@ecampus.demo',
+      DemoBackend.demoPassword,
+    );
+    expect(u.uid, 'u-student');
+  });
+
+  test('disabling a signed-in user ends their restored session', () async {
+    await backend.signIn('student@ecampus.demo', DemoBackend.demoPassword);
+    await backend.setUserActive('u-student', false);
+    expect(await backend.restoreSession(), isNull);
+  });
+
+  test('updateUser changes profile fields', () async {
+    final u = (await backend.watchUsers().first).firstWhere(
+      (u) => u.uid == 'u-student',
+    );
+    await backend.updateUser(
+      u.copyWith(name: 'Renamed', department: 'MBA', role: UserRole.teacher),
+    );
+    final after = (await backend.watchUsers().first).firstWhere(
+      (u) => u.uid == 'u-student',
+    );
+    expect(after.name, 'Renamed');
+    expect(after.department, 'MBA');
+    expect(after.role, UserRole.teacher);
   });
 
   test('books can be added and removed', () async {

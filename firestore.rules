@@ -2,45 +2,99 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---- Helpers -------------------------------------------------------
     function signedIn() { return request.auth != null; }
-    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function role() { return me().role; }
-    function isAdmin() { return signedIn() && role() == 'admin'; }
-    function canPostNews() { return signedIn() && role() in ['classRep', 'teacher', 'admin']; }
-    function canManageBooks() { return signedIn() && role() in ['teacher', 'admin']; }
-
-    // Profiles: anyone signed in can read; a user creates only their own
-    // profile and only as a student; only admins change roles.
-    match /users/{uid} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.auth.uid == uid
-                    && request.resource.data.role == 'student';
-      allow update: if isAdmin();
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    // Signed in, has a profile and has not been disabled. Profiles created
+    // before the "active" field existed count as active.
+    function active() { return signedIn() && profile().get('active', true) == true; }
+    function role() { return profile().role; }
+    function isAdmin() { return active() && role() == 'admin'; }
+    function isAdminStaff() { return active() && role() == 'adminStaff'; }
+    function isTeacher() { return active() && role() == 'teacher'; }
+    function notDriver() { return active() && role() != 'busDriver'; }
+    function canPostNews() {
+      return active() && role() in ['classRep', 'teacher', 'adminStaff', 'admin'];
+    }
+    function canManageBooks() {
+      return active() && role() in ['teacher', 'libraryStaff', 'adminStaff', 'admin'];
     }
 
+    // ---- Users ---------------------------------------------------------
+    // Nobody signs themselves up: only admin / admin staff create profiles
+    // (the app creates the login and the profile together).
+    match /users/{uid} {
+      allow read: if active();
+
+      allow create: if request.resource.data.keys().hasOnly(
+                         ['email', 'name', 'department', 'role', 'gender', 'active'])
+                    && request.resource.data.keys().hasAll(
+                         ['email', 'name', 'department', 'role', 'active'])
+                    && request.resource.data.active == true
+                    && (
+                      (isAdmin() && request.resource.data.role in
+                        ['admin', 'adminStaff', 'libraryStaff', 'teacher',
+                         'student', 'busDriver'])
+                      ||
+                      (isAdminStaff() && request.resource.data.role in
+                        ['libraryStaff', 'teacher', 'student', 'busDriver'])
+                    );
+
+      allow update: if
+        // Admin: anyone but themselves.
+        (isAdmin() && uid != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['name', 'department', 'role', 'gender', 'active']))
+        ||
+        // Admin staff: never administrators, never themselves, and they
+        // cannot grant administrator or admin-staff roles.
+        (isAdminStaff() && uid != request.auth.uid
+          && resource.data.role != 'admin'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['name', 'department', 'role', 'gender', 'active'])
+          && (request.resource.data.role == resource.data.role
+              || request.resource.data.role in
+                   ['student', 'classRep', 'teacher', 'libraryStaff', 'busDriver']))
+        ||
+        // Teachers: only toggle student <-> class rep inside their own
+        // department. (The 2 girls + 2 boys limit is enforced by the app.)
+        (isTeacher() && resource.data.department == profile().department
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+          && ((resource.data.role == 'student' && request.resource.data.role == 'classRep')
+              || (resource.data.role == 'classRep' && request.resource.data.role == 'student')));
+
+      // Accounts are disabled, never deleted.
+      allow delete: if false;
+    }
+
+    // ---- E-library -----------------------------------------------------
     match /books/{id} {
-      allow read: if signedIn();
+      allow read: if notDriver();
       allow write: if canManageBooks();
     }
 
+    // ---- Tech news -----------------------------------------------------
     match /news/{id} {
-      allow read: if signedIn();
+      allow read: if notDriver();
       allow create: if canPostNews()
-                    && (isAdmin() || request.resource.data.department == me().department);
-      allow delete: if canPostNews()
-                    && (isAdmin() || resource.data.department == me().department);
+                    && (isAdmin() || request.resource.data.department == profile().department);
+      allow delete: if isAdmin() || isAdminStaff()
+                    || (canPostNews() && resource.data.department == profile().department);
     }
 
-    // Chat id is "<uidA>_<uidB>" (sorted); only participants may use it.
+    // ---- Chat: id is "<uidA>_<uidB>"; only participants may use it ------
     match /chats/{chatId}/messages/{msgId} {
-      allow read: if signedIn() && request.auth.uid in chatId.split('_');
-      allow create: if signedIn() && request.auth.uid in chatId.split('_')
+      allow read: if active() && request.auth.uid in chatId.split('_');
+      allow create: if active() && request.auth.uid in chatId.split('_')
                     && request.resource.data.senderId == request.auth.uid;
     }
 
+    // ---- Bus -----------------------------------------------------------
     match /bus/{doc} {
-      allow read: if signedIn();
-      allow write: if isAdmin();
+      allow read: if active();
+      allow write: if active() && role() == 'busDriver';
     }
   }
 }

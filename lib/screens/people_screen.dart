@@ -47,6 +47,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
                   .where(
                     (u) =>
                         u.uid != widget.user.uid &&
+                        u.active &&
                         '${u.name} ${u.department} ${u.role.label}'
                             .toLowerCase()
                             .contains(_query),

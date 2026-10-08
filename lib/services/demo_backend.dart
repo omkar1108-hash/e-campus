@@ -10,8 +10,8 @@ import 'backend.dart';
 /// In-memory backend so the app can be demoed without Firebase.
 ///
 /// Demo accounts (password is always [demoPassword]):
-///   admin@ecampus.demo · teacher@ecampus.demo · rep@ecampus.demo ·
-///   student@ecampus.demo. New sign-ups are created as verified students.
+///   admin@ / staff@ / library@ / teacher@ / rep@ / student@ / driver@
+///   ecampus.demo. Accounts created in the app are active immediately.
 class DemoBackend implements Backend {
   DemoBackend({bool simulateBus = true}) {
     _seed();
@@ -42,33 +42,67 @@ class DemoBackend implements Backend {
   bool get isDemo => true;
 
   void _seed() {
-    void user(String uid, String email, String name, String dept, UserRole r) {
+    void user(
+      String uid,
+      String email,
+      String name,
+      UserRole role, {
+      Gender? gender,
+    }) {
       _usersByUid[uid] = AppUser(
         uid: uid,
         email: email,
         name: name,
-        department: dept,
-        role: r,
+        department: 'MCA',
+        role: role,
+        gender: gender,
       );
       _uidByEmail[email] = uid;
       _passwords[uid] = demoPassword;
     }
 
-    user('u-admin', 'admin@ecampus.demo', 'Asha Admin', 'MCA', UserRole.admin);
+    user('u-admin', 'admin@ecampus.demo', 'Asha Admin', UserRole.admin);
+    user('u-staff', 'staff@ecampus.demo', 'Sunil Staff', UserRole.adminStaff);
     user(
-      'u-teacher',
-      'teacher@ecampus.demo',
-      'Prof. Rao',
-      'MCA',
-      UserRole.teacher,
+      'u-library',
+      'library@ecampus.demo',
+      'Lata Library',
+      UserRole.libraryStaff,
     );
-    user('u-rep', 'rep@ecampus.demo', 'Ravi (CR)', 'MCA', UserRole.classRep);
+    user('u-teacher', 'teacher@ecampus.demo', 'Prof. Rao', UserRole.teacher);
+    user(
+      'u-rep',
+      'rep@ecampus.demo',
+      'Ravi (CR)',
+      UserRole.classRep,
+      gender: Gender.male,
+    );
     user(
       'u-student',
       'student@ecampus.demo',
       'Sneha Student',
-      'MCA',
       UserRole.student,
+      gender: Gender.female,
+    );
+    user(
+      'u-student2',
+      'student2@ecampus.demo',
+      'Arjun Student',
+      UserRole.student,
+      gender: Gender.male,
+    );
+    user(
+      'u-student3',
+      'student3@ecampus.demo',
+      'Kabir Student',
+      UserRole.student,
+      gender: Gender.male,
+    );
+    user(
+      'u-driver',
+      'driver@ecampus.demo',
+      'Dinesh Driver',
+      UserRole.busDriver,
     );
 
     _books.addAll(const [
@@ -155,11 +189,42 @@ class DemoBackend implements Backend {
 
   // ---- Auth -------------------------------------------------------------
   @override
-  Future<void> signUp({
+  Future<AppUser> signIn(String email, String password) async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final uid = _uidByEmail[email.trim().toLowerCase()];
+    if (uid == null || _passwords[uid] != password) {
+      throw const AuthException('Incorrect email or password.');
+    }
+    final user = _usersByUid[uid]!;
+    if (!user.active) {
+      throw const AuthException(
+        'Your account has been disabled. Please contact an administrator.',
+      );
+    }
+    _signedInUid = uid;
+    return user;
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) async {}
+
+  @override
+  Future<AppUser?> restoreSession() async {
+    final user = _signedInUid == null ? null : _usersByUid[_signedInUid];
+    return (user != null && user.active) ? user : null;
+  }
+
+  @override
+  Future<void> signOut() async => _signedInUid = null;
+
+  // ---- Accounts ---------------------------------------------------------
+  @override
+  Future<void> createAccount({
     required String email,
-    required String password,
     required String name,
     required String department,
+    required UserRole role,
+    Gender? gender,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final key = email.trim().toLowerCase();
@@ -172,40 +237,12 @@ class DemoBackend implements Backend {
       email: key,
       name: name,
       department: department,
-      role: UserRole.student,
+      role: role,
+      gender: gender,
     );
     _uidByEmail[key] = uid;
-    _passwords[uid] = password;
+    _passwords[uid] = demoPassword;
     _usersCtl.add(null);
-  }
-
-  @override
-  Future<AppUser> signIn(String email, String password) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    final uid = _uidByEmail[email.trim().toLowerCase()];
-    if (uid == null || _passwords[uid] != password) {
-      throw const AuthException('Incorrect email or password.');
-    }
-    _signedInUid = uid;
-    return _usersByUid[uid]!;
-  }
-
-  @override
-  Future<void> sendPasswordReset(String email) async {}
-
-  @override
-  Future<AppUser?> restoreSession() async =>
-      _signedInUid == null ? null : _usersByUid[_signedInUid];
-
-  @override
-  Future<void> signOut() async => _signedInUid = null;
-
-  // ---- Users ------------------------------------------------------------
-  Stream<T> _live<T>(Stream<void> trigger, T Function() read) async* {
-    yield read();
-    await for (final _ in trigger) {
-      yield read();
-    }
   }
 
   @override
@@ -215,11 +252,38 @@ class DemoBackend implements Backend {
   );
 
   @override
+  Future<void> updateUser(AppUser user) async {
+    if (!_usersByUid.containsKey(user.uid)) return;
+    _usersByUid[user.uid] = _usersByUid[user.uid]!.copyWith(
+      name: user.name,
+      department: user.department,
+      role: user.role,
+      gender: user.gender,
+    );
+    _usersCtl.add(null);
+  }
+
+  @override
+  Future<void> setUserActive(String uid, bool active) async {
+    final u = _usersByUid[uid];
+    if (u == null) return;
+    _usersByUid[uid] = u.copyWith(active: active);
+    _usersCtl.add(null);
+  }
+
+  @override
   Future<void> setUserRole(String uid, UserRole role) async {
     final u = _usersByUid[uid];
     if (u == null) return;
     _usersByUid[uid] = u.copyWith(role: role);
     _usersCtl.add(null);
+  }
+
+  Stream<T> _live<T>(Stream<void> trigger, T Function() read) async* {
+    yield read();
+    await for (final _ in trigger) {
+      yield read();
+    }
   }
 
   // ---- Books ------------------------------------------------------------
