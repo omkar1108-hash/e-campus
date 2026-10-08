@@ -7,24 +7,30 @@ class representatives, teachers and administrators.
 
 | Feature | Details |
 |---|---|
-| Email login & registration | Firebase email + password with a verification link; sign-up collects name and department |
-| Role-Based Access Control | `student`, `classRep`, `teacher`, `admin`. Permission matrix in `lib/utils/rbac.dart`, mirrored server-side in `firestore.rules` |
-| Role-aware drawer | Menu entries are generated from the user's role (e.g. *Manage Users* only for admins) |
-| E-Library | Search, read/download books (link-based); teachers/admins add and remove books |
-| Bus tracking | Live bus marker on Google Maps; admin shares phone GPS as the bus position |
-| Chat | One-to-one chat with teachers and friends (Cloud Firestore, real time) |
+| Email login | Firebase email + password. Accounts are **created by administrators** (no self sign-up). The new person gets a verification email and a "set your password" email |
+| Seven roles | `student`, `classRep`, `teacher`, `libraryStaff`, `busDriver`, `adminStaff`, `admin`. Rules live in `lib/utils/rbac.dart` and are enforced server-side in `firestore.rules` |
+| Role-aware drawer | Menu entries are generated from the user's role |
+| Account management | Admin / admin staff create, edit and **disable** accounts (Manage Users). Disabled people cannot sign in |
+| Class representatives | Teachers pick them for their own department: at most 2 girls and 2 boys |
+| E-Library | Search, read/download books (link-based); teachers, library staff, admin staff and admin add and remove books |
+| Bus tracking | Live bus marker on Google Maps; the bus driver shares phone GPS |
+| Chat | One-to-one chat (Cloud Firestore, real time) |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
-| Tech news | Class reps/teachers/admins post news; students see their own department's news |
+| Tech news | Class reps / teachers / admin staff / admin post; everyone but drivers reads their own department's news |
 
 ### Permission matrix
 
-| Capability | Student | Class Rep | Teacher | Admin |
-|---|:-:|:-:|:-:|:-:|
-| Library, bus, chat, chatbot, read news | ✔ | ✔ | ✔ | ✔ |
-| Post / delete news (own dept) | | ✔ | ✔ | ✔ (any) |
-| Add / remove books | | | ✔ | ✔ |
-| Publish bus location | | | | ✔ |
-| Manage user roles | | | | ✔ |
+| Capability | Student | Class Rep | Teacher | Library staff | Bus driver | Admin staff | Admin |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Chat, track bus | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Library, chatbot, read news | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
+| Post news (own department) | | ✔ | ✔ | | | ✔ | ✔ (any) |
+| Delete news | | own dept | own dept | | | any | any |
+| Add / remove books | | | ✔ | ✔ | | ✔ | ✔ |
+| Share bus location | | | | | ✔ | | |
+| Choose class reps (own dept) | | | ✔ | | | | |
+| Create / edit / disable accounts | | | | | | all but admins | all but self |
+| Create accounts of role | | | | | | library, teacher, student, driver | any except class rep |
 
 ## Run it right now (demo mode)
 
@@ -36,9 +42,9 @@ flutter pub get
 flutter run
 ```
 
-Demo accounts (password `demo1234`): `admin@ecampus.demo`,
-`teacher@ecampus.demo`, `rep@ecampus.demo`, `student@ecampus.demo`. New
-sign-ups in demo mode are created as students and are usable immediately.
+Demo accounts (password `demo1234`): `admin@`, `staff@`, `library@`,
+`teacher@`, `rep@`, `student@`, `student2@`, `student3@`, `driver@`
+`ecampus.demo`. Accounts created inside the demo are active immediately.
 
 ## Production setup (Firebase, Maps, Gemini)
 
@@ -47,9 +53,12 @@ sign-ups in demo mode are created as students and are usable immediately.
    `dart pub global run flutterfire_cli:flutterfire configure` to generate
    `lib/firebase_options.dart` (required to build; commit it).
    - Publish `firestore.rules` (Firestore -> Rules).
-   - **First admin:** register once in the app and verify the email, then in the
-     Firestore console set that user's `users/<uid>.role` to `admin`. Admins can
-     then promote others from *Manage Users*.
+   - **First admin:** there is no self sign-up, so create the very first
+     administrator by hand: in *Authentication -> Users* add a user, then in
+     *Firestore -> users* create a document named with that user's UID and the
+     fields `email`, `name`, `department` (strings), `role` = `admin` and
+     `active` = `true` (boolean). Everyone else is created from the app
+     (*Manage Users -> Create account*).
 2. **Google Maps** – enable *Maps SDK for Android*, then put the key in
    `android/local.properties`:
    `MAPS_API_KEY=your_key`
@@ -74,6 +83,7 @@ lib/
                             library, bus, people, chat, chatbot, news, users admin
   utils/rbac.dart           Permission rules
 firestore.rules             Server-side RBAC
+firestore_tests/            Rules tests (Firebase emulator): `cd firestore_tests && npm install && npm test`
 test/                       RBAC, backend and widget-flow tests
 ```
 

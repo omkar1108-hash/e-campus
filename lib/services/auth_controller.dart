@@ -5,7 +5,8 @@ import 'backend.dart';
 
 enum AuthStatus { loading, signedOut, signedIn }
 
-/// Holds the signed-in user and drives sign-in / sign-up.
+/// Holds the signed-in user and drives sign-in. Accounts are created by
+/// administrators (see the Manage Users screen), not by users themselves.
 class AuthController extends ChangeNotifier {
   AuthController(this.backend);
 
@@ -32,18 +33,6 @@ class AuthController extends ChangeNotifier {
     _status = AuthStatus.signedIn;
     notifyListeners();
   }
-
-  Future<void> signUp({
-    required String email,
-    required String password,
-    required String name,
-    required String department,
-  }) => backend.signUp(
-    email: email.trim(),
-    password: password,
-    name: name,
-    department: department,
-  );
 
   Future<void> sendPasswordReset(String email) =>
       backend.sendPasswordReset(email.trim());

@@ -10,7 +10,8 @@ import 'dashboard_screen.dart';
 import 'library_screen.dart';
 import 'news_screen.dart';
 import 'people_screen.dart';
-import 'users_admin_screen.dart';
+import 'class_reps_screen.dart';
+import 'manage_users_screen.dart';
 
 class _Destination {
   const _Destination(this.title, this.icon, this.builder, this.allowed);
@@ -70,9 +71,15 @@ class _HomeScreenState extends State<HomeScreen> {
       Rbac.canReadNews,
     ),
     _Destination(
+      'Class Representatives',
+      Icons.how_to_reg,
+      (u) => ClassRepsScreen(user: u),
+      Rbac.canAssignClassReps,
+    ),
+    _Destination(
       'Manage Users',
       Icons.admin_panel_settings,
-      (u) => UsersAdminScreen(user: u),
+      (u) => ManageUsersScreen(user: u),
       Rbac.canManageUsers,
     ),
   ];

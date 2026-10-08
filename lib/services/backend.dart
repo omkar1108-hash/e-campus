@@ -18,17 +18,8 @@ abstract class Backend {
   bool get isDemo;
 
   // ---- Auth -------------------------------------------------------------
-  /// Creates the account and its student profile, then sends a verification
-  /// email. The user is signed out afterwards and must verify before logging in.
-  Future<void> signUp({
-    required String email,
-    required String password,
-    required String name,
-    required String department,
-  });
-
   /// Signs in and returns the profile. Throws [AuthException] for bad
-  /// credentials or an unverified email.
+  /// credentials, an unverified email or a disabled account.
   Future<AppUser> signIn(String email, String password);
 
   Future<void> sendPasswordReset(String email);
@@ -38,8 +29,27 @@ abstract class Backend {
 
   Future<void> signOut();
 
-  // ---- Users / RBAC -----------------------------------------------------
+  // ---- Accounts / RBAC --------------------------------------------------
+  /// Creates a login plus profile for someone else (admin / admin staff
+  /// only) and emails them a verification link and a "set your password"
+  /// link. The caller stays signed in.
+  Future<void> createAccount({
+    required String email,
+    required String name,
+    required String department,
+    required UserRole role,
+    Gender? gender,
+  });
+
   Stream<List<AppUser>> watchUsers();
+
+  /// Edits name, department, gender and role.
+  Future<void> updateUser(AppUser user);
+
+  /// Disables or re-enables an account. Disabled users cannot sign in.
+  Future<void> setUserActive(String uid, bool active);
+
+  /// Changes only the role (used by teachers for class representatives).
   Future<void> setUserRole(String uid, UserRole role);
 
   // ---- E-Library --------------------------------------------------------

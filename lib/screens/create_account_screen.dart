@@ -2,67 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../config/app_config.dart';
-import '../services/auth_controller.dart';
+import '../models/app_user.dart';
 import '../services/backend.dart';
+import '../utils/rbac.dart';
 
-/// Create an account. A verification email is sent; the user must open the
-/// link before they can sign in.
-class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+/// Admin / admin staff: create a login for someone. They receive a
+/// verification email and a link to choose their own password.
+class CreateAccountScreen extends StatefulWidget {
+  const CreateAccountScreen({super.key, required this.actor});
+
+  final AppUser actor;
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  State<CreateAccountScreen> createState() => _CreateAccountScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
+class _CreateAccountScreenState extends State<CreateAccountScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _email = TextEditingController();
-  final _password = TextEditingController();
   String _department = AppConfig.departments.first;
+  late UserRole _role = Rbac.rolesCreatableBy(widget.actor).last;
+  Gender? _gender;
   bool _busy = false;
-  bool _obscure = true;
 
   @override
   void dispose() {
     _name.dispose();
     _email.dispose();
-    _password.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final auth = context.read<AuthController>();
-    final isDemo = context.read<Backend>().isDemo;
+    final backend = context.read<Backend>();
     final nav = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
-      await auth.signUp(
+      await backend.createAccount(
         email: _email.text,
-        password: _password.text,
         name: _name.text.trim(),
         department: _department,
+        role: _role,
+        gender: _gender,
       );
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 6),
-          content: Text(
-            isDemo
-                ? 'Account created. You can sign in now.'
-                : 'Account created. We sent a verification link to '
-                      '${_email.text.trim()} - open it, then sign in.',
-          ),
-        ),
-      );
-      nav.pop();
+      nav.pop(true);
     } on AuthException catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Registration failed: $e')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -70,6 +59,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final roles = Rbac.rolesCreatableBy(widget.actor);
     return Scaffold(
       appBar: AppBar(title: const Text('Create account')),
       body: Form(
@@ -85,14 +75,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 prefixIcon: Icon(Icons.person),
               ),
               validator: (v) =>
-                  (v == null || v.trim().length < 2) ? 'Enter your name' : null,
+                  (v == null || v.trim().length < 2) ? 'Enter a name' : null,
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
               decoration: const InputDecoration(
-                labelText: 'Email',
+                labelText: 'Email (they must be able to open it)',
                 prefixIcon: Icon(Icons.email),
               ),
               validator: (v) => (v ?? '').trim().contains('@')
@@ -100,21 +90,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   : 'Enter a valid email address',
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _password,
-              obscureText: _obscure,
-              decoration: InputDecoration(
-                labelText: 'Password (min 6 characters)',
-                prefixIcon: const Icon(Icons.lock),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscure ? Icons.visibility : Icons.visibility_off,
-                  ),
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                ),
+            DropdownButtonFormField<UserRole>(
+              initialValue: _role,
+              decoration: const InputDecoration(
+                labelText: 'Role',
+                prefixIcon: Icon(Icons.badge),
               ),
-              validator: (v) =>
-                  (v ?? '').length < 6 ? 'Use at least 6 characters' : null,
+              items: [
+                for (final r in roles)
+                  DropdownMenuItem(value: r, child: Text(r.label)),
+              ],
+              onChanged: (v) => setState(() => _role = v ?? _role),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -129,16 +115,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ],
               onChanged: (v) => setState(() => _department = v ?? _department),
             ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<Gender>(
+              initialValue: _gender,
+              decoration: InputDecoration(
+                labelText: _role == UserRole.student
+                    ? 'Gender (required for students)'
+                    : 'Gender (optional)',
+                prefixIcon: const Icon(Icons.wc),
+              ),
+              items: [
+                for (final g in Gender.values)
+                  DropdownMenuItem(value: g, child: Text(g.label)),
+              ],
+              onChanged: (v) => setState(() => _gender = v),
+              validator: (v) => (_role == UserRole.student && v == null)
+                  ? 'Select a gender'
+                  : null,
+            ),
             const SizedBox(height: 8),
             const Text(
-              'New accounts start as students. An administrator can grant '
-              'teacher or class representative access.',
+              'The person receives two emails: one to verify their address '
+              'and one to choose their password. They can then sign in.',
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _busy ? null : _submit,
-              child: const Text('Register'),
+              child: _busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Create account'),
             ),
           ],
         ),

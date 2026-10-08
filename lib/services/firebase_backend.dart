@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
@@ -24,44 +27,6 @@ class FirebaseBackend implements Backend {
       _db.collection('users');
 
   // ---- Auth -------------------------------------------------------------
-  @override
-  Future<void> signUp({
-    required String email,
-    required String password,
-    required String name,
-    required String department,
-  }) async {
-    try {
-      final cred = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      final user = cred.user!;
-      try {
-        // New accounts are always students; an admin promotes them later.
-        await _users
-            .doc(user.uid)
-            .set(
-              AppUser(
-                uid: user.uid,
-                email: email,
-                name: name,
-                department: department,
-                role: UserRole.student,
-              ).toMap(),
-            );
-        await user.sendEmailVerification();
-      } catch (_) {
-        // Don't leave an account without a profile behind.
-        await user.delete();
-        rethrow;
-      }
-      await _auth.signOut();
-    } on FirebaseAuthException catch (e) {
-      throw AuthException(_authMessage(e));
-    }
-  }
-
   @override
   Future<AppUser> signIn(String email, String password) async {
     try {
@@ -89,6 +54,12 @@ class FirebaseBackend implements Backend {
           'No profile found for this account. Please contact an administrator.',
         );
       }
+      if (!profile.active) {
+        await _auth.signOut();
+        throw const AuthException(
+          'Your account has been disabled. Please contact an administrator.',
+        );
+      }
       return profile;
     } on FirebaseAuthException catch (e) {
       throw AuthException(_authMessage(e));
@@ -108,7 +79,12 @@ class FirebaseBackend implements Backend {
   Future<AppUser?> restoreSession() async {
     final user = _auth.currentUser;
     if (user == null || !user.emailVerified) return null;
-    return _profileOf(user.uid);
+    final profile = await _profileOf(user.uid);
+    if (profile == null || !profile.active) {
+      await _auth.signOut();
+      return null;
+    }
+    return profile;
   }
 
   Future<AppUser?> _profileOf(String uid) async {
@@ -118,6 +94,84 @@ class FirebaseBackend implements Backend {
 
   @override
   Future<void> signOut() => _auth.signOut();
+
+  // ---- Accounts ---------------------------------------------------------
+  /// A second Firebase app instance is used to create the login, because
+  /// creating a user on the default instance would sign the admin out.
+  Future<FirebaseAuth> _creatorAuth() async {
+    const name = 'account-creator';
+    FirebaseApp app;
+    try {
+      app = Firebase.app(name);
+    } catch (_) {
+      app = await Firebase.initializeApp(
+        name: name,
+        options: Firebase.app().options,
+      );
+    }
+    return FirebaseAuth.instanceFor(app: app);
+  }
+
+  static String _randomPassword() {
+    const chars =
+        'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%';
+    final rnd = Random.secure();
+    return List.generate(24, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  @override
+  Future<void> createAccount({
+    required String email,
+    required String name,
+    required String department,
+    required UserRole role,
+    Gender? gender,
+  }) async {
+    final address = email.trim().toLowerCase();
+    final creator = await _creatorAuth();
+    User? created;
+    try {
+      // The new person never learns this password; they set their own
+      // through the emailed link.
+      final cred = await creator.createUserWithEmailAndPassword(
+        email: address,
+        password: _randomPassword(),
+      );
+      created = cred.user!;
+      try {
+        await _users
+            .doc(created.uid)
+            .set(
+              AppUser(
+                uid: created.uid,
+                email: address,
+                name: name,
+                department: department,
+                role: role,
+                gender: gender,
+              ).toMap(),
+            );
+      } catch (_) {
+        // Don't leave a login without a profile behind.
+        await created.delete();
+        created = null;
+        rethrow;
+      }
+      try {
+        await created.sendEmailVerification();
+        await creator.sendPasswordResetEmail(email: address);
+      } catch (_) {
+        throw const AuthException(
+          'The account was created, but the emails could not be sent. '
+          'Open the user and tap "Resend setup email".',
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      throw AuthException(_authMessage(e));
+    } finally {
+      await creator.signOut();
+    }
+  }
 
   static String _authMessage(FirebaseAuthException e) {
     switch (e.code) {
@@ -142,13 +196,24 @@ class FirebaseBackend implements Backend {
     }
   }
 
-  // ---- Users ------------------------------------------------------------
   @override
   Stream<List<AppUser>> watchUsers() => _users.snapshots().map(
     (s) =>
         s.docs.map((d) => AppUser.fromMap(d.id, d.data())).toList()
           ..sort((a, b) => a.name.compareTo(b.name)),
   );
+
+  @override
+  Future<void> updateUser(AppUser user) => _users.doc(user.uid).update({
+    'name': user.name,
+    'department': user.department,
+    'role': user.role.name,
+    if (user.gender != null) 'gender': user.gender!.name,
+  });
+
+  @override
+  Future<void> setUserActive(String uid, bool active) =>
+      _users.doc(uid).update({'active': active});
 
   @override
   Future<void> setUserRole(String uid, UserRole role) =>
