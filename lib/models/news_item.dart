@@ -6,6 +6,7 @@ class NewsItem {
     required this.department,
     required this.authorName,
     required this.createdAt,
+    this.image,
   });
 
   final String id;
@@ -15,12 +16,16 @@ class NewsItem {
   final String authorName;
   final DateTime createdAt;
 
+  /// Optional poster picture (base64 JPEG, picked from the gallery).
+  final String? image;
+
   Map<String, dynamic> toMap() => {
     'title': title,
     'body': body,
     'department': department,
     'authorName': authorName,
     'createdAt': createdAt.millisecondsSinceEpoch,
+    if (image != null) 'image': image,
   };
 
   factory NewsItem.fromMap(String id, Map<String, dynamic> map) => NewsItem(
@@ -32,5 +37,6 @@ class NewsItem {
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (map['createdAt'] ?? 0) as int,
     ),
+    image: map['image'] as String?,
   );
 }

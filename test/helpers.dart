@@ -7,7 +7,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fakes.dart';
 
 /// Starts the app on the demo backend in a tall window.
-Future<DemoBackend> startApp(WidgetTester tester) async {
+Future<DemoBackend> startApp(
+  WidgetTester tester, {
+  FakeImagePicker? imagePicker,
+}) async {
   tester.view.physicalSize = const Size(800, 1800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -15,7 +18,11 @@ Future<DemoBackend> startApp(WidgetTester tester) async {
   final backend = DemoBackend();
   addTearDown(backend.dispose);
   await tester.pumpWidget(
-    ECampusApp(backend: backend, locationSource: FakeLocation()),
+    ECampusApp(
+      backend: backend,
+      locationSource: FakeLocation(),
+      imagePicker: imagePicker ?? FakeImagePicker(),
+    ),
   );
   await tester.pumpAndSettle();
   return backend;

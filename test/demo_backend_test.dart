@@ -83,7 +83,14 @@ void main() {
   });
 
   test('books can be added and removed', () async {
-    final before = (await backend.watchBooks().first).length;
+    const admin = AppUser(
+      uid: 'a',
+      email: 'a@x.y',
+      name: 'a',
+      department: 'MCA',
+      role: UserRole.admin,
+    );
+    final before = (await backend.watchBooks(admin).first).length;
     await backend.addBook(
       const Book(
         id: '',
@@ -93,10 +100,10 @@ void main() {
         url: 'https://x.y',
       ),
     );
-    final after = await backend.watchBooks().first;
+    final after = await backend.watchBooks(admin).first;
     expect(after.length, before + 1);
     await backend.deleteBook(after.firstWhere((b) => b.title == 'T').id);
-    expect((await backend.watchBooks().first).length, before);
+    expect((await backend.watchBooks(admin).first).length, before);
   });
 
   test('news is scoped to department', () async {

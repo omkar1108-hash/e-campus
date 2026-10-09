@@ -7,16 +7,25 @@ import 'services/auth_controller.dart';
 import 'services/backend.dart';
 import 'services/chatbot_service.dart';
 import 'services/demo_location_source.dart';
+import 'services/image_service.dart';
 import 'services/location_source.dart';
 import 'services/trip_controller.dart';
 
 class ECampusApp extends StatelessWidget {
-  const ECampusApp({super.key, required this.backend, this.locationSource});
+  const ECampusApp({
+    super.key,
+    required this.backend,
+    this.locationSource,
+    this.imagePicker,
+  });
 
   final Backend backend;
 
   /// Where bus GPS positions come from (a fake one is used in demo mode).
   final LocationSource? locationSource;
+
+  /// Where gallery / camera pictures come from (a fake one in tests).
+  final ImagePickerService? imagePicker;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +38,9 @@ class ECampusApp extends StatelessWidget {
       providers: [
         Provider<Backend>.value(value: backend),
         Provider<LocationSource>.value(value: location),
+        Provider<ImagePickerService>.value(
+          value: imagePicker ?? DeviceImagePicker(),
+        ),
         ChangeNotifierProvider<TripController>(
           create: (_) => TripController(backend, location),
         ),

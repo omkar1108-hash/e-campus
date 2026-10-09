@@ -9,6 +9,8 @@ import '../models/book.dart';
 import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
+import '../utils/rbac.dart';
+import '../utils/stream_merge.dart';
 import 'backend.dart';
 
 /// Production backend: Firebase Auth (email + password) + Cloud Firestore.
@@ -220,22 +222,83 @@ class FirebaseBackend implements Backend {
       _users.doc(uid).update({'role': role.name});
 
   // ---- Books ------------------------------------------------------------
-  @override
-  Stream<List<Book>> watchBooks() => _db
-      .collection('books')
-      .snapshots()
-      .map(
-        (s) =>
-            s.docs.map((d) => Book.fromMap(d.id, d.data())).toList()
-              ..sort((a, b) => a.title.compareTo(b.title)),
-      );
+  CollectionReference<Map<String, dynamic>> get _books =>
+      _db.collection('books');
+
+  List<Book> _bookList(QuerySnapshot<Map<String, dynamic>> s) =>
+      s.docs.map((d) => Book.fromMap(d.id, d.data())).toList();
 
   @override
-  Future<void> addBook(Book book) => _db.collection('books').add(book.toMap());
+  Stream<List<Book>> watchBooks(AppUser viewer) {
+    // Each query must match what the security rules allow this role to read.
+    final Stream<List<Book>> books;
+    if (Rbac.seesAllBooks(viewer)) {
+      books = _books.snapshots().map(_bookList);
+    } else {
+      final approved = _books
+          .where('status', isEqualTo: BookStatus.approved.name)
+          .snapshots()
+          .map(_bookList);
+      books = viewer.role == UserRole.teacher
+          ? mergeLists(
+              approved,
+              _books
+                  .where('uploadedBy', isEqualTo: viewer.uid)
+                  .snapshots()
+                  .map(_bookList),
+              (b) => b.id,
+            )
+          : approved;
+    }
+    return books.map((l) => l..sort((a, b) => a.title.compareTo(b.title)));
+  }
 
   @override
-  Future<void> deleteBook(String id) =>
-      _db.collection('books').doc(id).delete();
+  Future<void> addBook(Book book) => _books.add(book.toMap());
+
+  @override
+  Future<void> updateBook(
+    Book book, {
+    bool resubmit = false,
+  }) => _books.doc(book.id).update({
+    'title': book.title,
+    'author': book.author,
+    'category': book.category,
+    'url': book.url,
+    'isbn': book.isbn,
+    'cover': book.cover ?? FieldValue.delete(),
+    if (resubmit) ...{'status': BookStatus.pending.name, 'rejectReason': ''},
+  });
+
+  @override
+  Future<void> reviewBook(
+    String id, {
+    required bool approve,
+    String reason = '',
+  }) => _books.doc(id).update({
+    'status': (approve ? BookStatus.approved : BookStatus.rejected).name,
+    'rejectReason': approve ? '' : reason,
+  });
+
+  @override
+  Future<void> deleteBook(String id) => _books.doc(id).delete();
+
+  @override
+  Future<int> approveLegacyBooks() async {
+    final all = await _books.get();
+    final old = all.docs.where((d) => !d.data().containsKey('status')).toList();
+    for (var i = 0; i < old.length; i += 400) {
+      final batch = _db.batch();
+      for (final d in old.skip(i).take(400)) {
+        batch.update(d.reference, {
+          'status': BookStatus.approved.name,
+          'uploadedBy': '',
+        });
+      }
+      await batch.commit();
+    }
+    return old.length;
+  }
 
   // ---- News -------------------------------------------------------------
   @override
