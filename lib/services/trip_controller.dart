@@ -77,8 +77,9 @@ class TripController extends ChangeNotifier {
     final bus = _bus;
     if (bus == null || !bus.canAutoSwitch) return;
     final to = _leg == Bus.returning ? bus.start! : bus.end!;
-    if (distanceMeters(f.lat, f.lng, to.lat, to.lng) > Bus.arrivalRadius)
+    if (distanceMeters(f.lat, f.lng, to.lat, to.lng) > Bus.arrivalRadius) {
       return;
+    }
     final next = _leg == Bus.returning ? Bus.outbound : Bus.returning;
     _leg = next;
     await backend.setBusLeg(busId, next);
