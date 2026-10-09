@@ -6,6 +6,7 @@ import '../models/app_user.dart';
 import '../models/news_item.dart';
 import '../services/backend.dart';
 import '../utils/rbac.dart';
+import '../widgets/link_text.dart';
 
 /// Tech news for the user's department. Class representatives (and teachers /
 /// admins) post items; every student in that department sees them.
@@ -75,7 +76,7 @@ class NewsScreen extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(n.body),
+                      LinkText(n.body),
                       const SizedBox(height: 8),
                       Text(
                         '${n.authorName} · ${fmt.format(n.createdAt)}',

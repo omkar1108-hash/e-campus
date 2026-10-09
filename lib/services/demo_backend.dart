@@ -25,12 +25,15 @@ class DemoBackend implements Backend {
   final List<Book> _books = [];
   final List<NewsItem> _news = [];
   final Map<String, List<ChatMessage>> _chats = {};
+  final Map<String, ChatSummary> _summaries = {};
+  final Map<String, Map<String, DateTime>> _reads = {};
   final Map<String, Bus> _buses = {};
 
   final _usersCtl = StreamController<void>.broadcast();
   final _booksCtl = StreamController<void>.broadcast();
   final _newsCtl = StreamController<void>.broadcast();
   final _chatCtl = StreamController<String>.broadcast();
+  final _inboxCtl = StreamController<void>.broadcast();
   final _busCtl = StreamController<void>.broadcast();
 
   String? _signedInUid;
@@ -97,6 +100,25 @@ class DemoBackend implements Backend {
       UserRole.student,
       gender: Gender.male,
     );
+    _usersByUid['u-student-mba'] = const AppUser(
+      uid: 'u-student-mba',
+      email: 'meena@ecampus.demo',
+      name: 'Meena MBA',
+      department: 'MBA',
+      role: UserRole.student,
+      gender: Gender.female,
+    );
+    _uidByEmail['meena@ecampus.demo'] = 'u-student-mba';
+    _passwords['u-student-mba'] = demoPassword;
+    _usersByUid['u-teacher-mba'] = const AppUser(
+      uid: 'u-teacher-mba',
+      email: 'iyer@ecampus.demo',
+      name: 'Prof. Iyer',
+      department: 'MBA',
+      role: UserRole.teacher,
+    );
+    _uidByEmail['iyer@ecampus.demo'] = 'u-teacher-mba';
+    _passwords['u-teacher-mba'] = demoPassword;
     user(
       'u-driver',
       'driver@ecampus.demo',
@@ -343,7 +365,117 @@ class DemoBackend implements Backend {
             sentAt: message.sentAt,
           ),
         );
+    _summaries[chatId] = ChatSummary(
+      chatId: chatId,
+      participants: chatId.split('_'),
+      lastText: message.text,
+      lastMessageAt: message.sentAt,
+      lastSenderId: message.senderId,
+    );
     _chatCtl.add(chatId);
+    _inboxCtl.add(null);
+  }
+
+  void _changeMessage(
+    String chatId,
+    String messageId,
+    ChatMessage Function(ChatMessage m) change,
+  ) {
+    final list = _chats[chatId];
+    if (list == null) return;
+    final i = list.indexWhere((m) => m.id == messageId);
+    if (i < 0) return;
+    list[i] = change(list[i]);
+    _chatCtl.add(chatId);
+  }
+
+  void _setPreview(String chatId, String text) {
+    final s = _summaries[chatId];
+    if (s == null) return;
+    _summaries[chatId] = ChatSummary(
+      chatId: chatId,
+      participants: s.participants,
+      lastText: text,
+      lastMessageAt: s.lastMessageAt,
+      lastSenderId: s.lastSenderId,
+    );
+    _inboxCtl.add(null);
+  }
+
+  @override
+  Future<void> editMessage(
+    String chatId,
+    String messageId,
+    String text, {
+    bool isLast = false,
+  }) async {
+    _changeMessage(
+      chatId,
+      messageId,
+      (m) => ChatMessage(
+        id: m.id,
+        senderId: m.senderId,
+        text: text,
+        sentAt: m.sentAt,
+        editedAt: DateTime.now(),
+        deleted: m.deleted,
+        pinned: m.pinned,
+      ),
+    );
+    if (isLast) _setPreview(chatId, text);
+  }
+
+  @override
+  Future<void> deleteMessage(
+    String chatId,
+    String messageId, {
+    bool isLast = false,
+  }) async {
+    _changeMessage(
+      chatId,
+      messageId,
+      (m) => ChatMessage(
+        id: m.id,
+        senderId: m.senderId,
+        text: '',
+        sentAt: m.sentAt,
+        editedAt: m.editedAt,
+        deleted: true,
+      ),
+    );
+    if (isLast) _setPreview(chatId, 'Message deleted');
+  }
+
+  @override
+  Future<void> setPinned(String chatId, String messageId, bool pinned) async =>
+      _changeMessage(
+        chatId,
+        messageId,
+        (m) => ChatMessage(
+          id: m.id,
+          senderId: m.senderId,
+          text: m.text,
+          sentAt: m.sentAt,
+          editedAt: m.editedAt,
+          deleted: m.deleted,
+          pinned: pinned && !m.deleted,
+        ),
+      );
+
+  @override
+  Stream<List<ChatSummary>> watchChats(String uid) => _live(
+    _inboxCtl.stream,
+    () => _summaries.values.where((c) => c.participants.contains(uid)).toList(),
+  );
+
+  @override
+  Stream<Map<String, DateTime>> watchReadMarkers(String uid) =>
+      _live(_inboxCtl.stream, () => Map.of(_reads[uid] ?? const {}));
+
+  @override
+  Future<void> markRead(String uid, String chatId, {DateTime? at}) async {
+    _reads.putIfAbsent(uid, () => {})[chatId] = at ?? DateTime.now();
+    _inboxCtl.add(null);
   }
 
   // ---- Buses ------------------------------------------------------------

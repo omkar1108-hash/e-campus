@@ -225,16 +225,134 @@ test('news: who may delete', async () => {
 });
 
 // ---- chat ------------------------------------------------------------------
-test('chat: only the two participants, and no spoofed senders', async () => {
-  const chat = 'driver_student';
-  const msgs = (db) => collection(db, 'chats', chat, 'messages');
-  await assertSucceeds(addDoc(msgs(as('driver')), { senderId: 'driver', text: 'hi', sentAt: 1 }));
-  await assertSucceeds(addDoc(msgs(as('student')), { senderId: 'student', text: 'hi', sentAt: 2 }));
-  await assertFails(addDoc(msgs(as('student')), { senderId: 'driver', text: 'spoof', sentAt: 3 }));
-  await assertFails(addDoc(msgs(as('teacher')), { senderId: 'teacher', text: 'x', sentAt: 4 }));
-  await assertSucceeds(getDoc(doc(as('student'), 'chats', chat, 'messages', 'any')));
-  await assertFails(getDoc(doc(as('teacher'), 'chats', chat, 'messages', 'any')));
-  await assertFails(getDoc(doc(anon(), 'chats', chat, 'messages', 'any')));
+// Who may talk to whom (see ChatPolicy in the app).
+const chatId = (a, b) => [a, b].sort().join('_');
+const msgs = (db, a, b) => collection(db, 'chats', chatId(a, b), 'messages');
+const msg = (sender, text = 'hi') => ({ senderId: sender, text, sentAt: 1, deleted: false, pinned: false });
+const canSend = async (from, to) => {
+  try {
+    await assertSucceeds(addDoc(msgs(as(from), from, to), msg(from)));
+    return true;
+  } catch (_) {
+    await assertFails(addDoc(msgs(as(from), from, to), msg(from)));
+    return false;
+  }
+};
+
+test('chat: students talk to all students and to teachers of their own department', async () => {
+  for (const [a, b] of [['student', 'studentMBA'], ['student', 'rep'], ['rep', 'repMBA'], ['student', 'teacher'], ['teacher', 'student'], ['studentMBA', 'teacherMBA']])
+    if (!(await canSend(a, b))) throw new Error(`${a} -> ${b} should be allowed`);
+});
+
+test('chat: students cannot chat with teachers of other departments or with other staff', async () => {
+  for (const [a, b] of [['student', 'teacherMBA'], ['studentMBA', 'teacher'], ['student', 'library'], ['student', 'staff'],
+    ['student', 'admin'], ['student', 'driver'], ['rep', 'library'], ['rep', 'driver'],
+    ['library', 'student'], ['driver', 'student'], ['admin', 'student'], ['staff', 'rep'], ['teacherMBA', 'student']])
+    if (await canSend(a, b)) throw new Error(`${a} -> ${b} should be refused`);
+});
+
+test('chat: staff talk to each other', async () => {
+  for (const [a, b] of [['teacher', 'teacherMBA'], ['teacher', 'library'], ['library', 'staff'], ['admin', 'driver'], ['driver', 'teacher'], ['staff', 'admin']])
+    if (!(await canSend(a, b))) throw new Error(`${a} -> ${b} should be allowed`);
+});
+
+test('chat: nobody chats with a disabled person or with themselves, and strangers are refused', async () => {
+  if (await canSend('admin', 'disabledAdmin')) throw new Error('disabled account was reachable');
+  await assertFails(addDoc(msgs(as('student'), 'student', 'student'), msg('student')));
+  await assertFails(addDoc(msgs(anon(), 'student', 'rep'), msg('student')));
+});
+
+test('chat: messages must be well formed and sent as yourself', async () => {
+  const db = as('student');
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), msg('rep')));                       // spoofed sender
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), { ...msg('student'), pinned: true }));
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), { ...msg('student'), deleted: true }));
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), msg('student', '')));               // empty
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), msg('student', 'x'.repeat(4001))));
+  await assertFails(addDoc(msgs(db, 'student', 'rep'), { ...msg('student'), admin: true })); // extra field
+  await assertFails(addDoc(msgs(as('teacher'), 'student', 'rep'), msg('teacher')));        // not a participant
+});
+
+test('chat: only the two people read a conversation', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) =>
+    setDoc(doc(ctx.firestore(), 'chats', chatId('student', 'rep'), 'messages', 'm1'), msg('student')));
+  const m = (uid) => doc(as(uid), 'chats', chatId('student', 'rep'), 'messages', 'm1');
+  await assertSucceeds(getDoc(m('student')));
+  await assertSucceeds(getDoc(m('rep')));
+  await assertFails(getDoc(m('teacher')));
+  await assertFails(getDoc(m('admin')));
+  await assertFails(getDoc(doc(anon(), 'chats', chatId('student', 'rep'), 'messages', 'm1')));
+});
+
+const seedMsg = async (a = 'student', b = 'rep', id = 'm1', extra = {}) =>
+  env.withSecurityRulesDisabled(async (ctx) =>
+    setDoc(doc(ctx.firestore(), 'chats', chatId(a, b), 'messages', id), { ...msg(a), ...extra }));
+const m = (uid, a = 'student', b = 'rep', id = 'm1') => doc(as(uid), 'chats', chatId(a, b), 'messages', id);
+
+test('chat: only the sender edits a message, and only its text', async () => {
+  await seedMsg();
+  await assertSucceeds(updateDoc(m('student'), { text: 'fixed', editedAt: 5 }));
+  await assertFails(updateDoc(m('rep'), { text: 'hijack', editedAt: 5 }));      // the other person
+  await assertFails(updateDoc(m('teacher'), { text: 'hijack', editedAt: 5 }));  // a stranger
+  await assertFails(updateDoc(m('student'), { senderId: 'rep' }));
+  await assertFails(updateDoc(m('student'), { text: '', editedAt: 5 }));
+  await assertFails(updateDoc(m('student'), { text: 'x', sentAt: 99 }));
+});
+
+test('chat: only the sender deletes a message, for everyone, leaving a stub', async () => {
+  await seedMsg();
+  await assertFails(updateDoc(m('rep'), { deleted: true, text: '', pinned: false }));
+  await assertFails(updateDoc(m('student'), { deleted: true }));                 // text must be cleared
+  await assertFails(deleteDoc(m('student')));                                    // never hard-deleted
+  await assertSucceeds(updateDoc(m('student'), { deleted: true, text: '', pinned: false }));
+  // A deleted message cannot be edited or pinned again.
+  await assertFails(updateDoc(m('student'), { text: 'back', editedAt: 6 }));
+  await assertFails(updateDoc(m('rep'), { pinned: true }));
+});
+
+test('chat: either person pins and unpins, nobody else, and nothing else changes', async () => {
+  await seedMsg();
+  await assertSucceeds(updateDoc(m('rep'), { pinned: true }));
+  await assertSucceeds(updateDoc(m('student'), { pinned: false }));
+  await assertFails(updateDoc(m('teacher'), { pinned: true }));
+  await assertFails(updateDoc(m('rep'), { pinned: true, text: 'changed' }));
+  await assertFails(updateDoc(m('rep'), { pinned: 'yes' }));
+});
+
+test('chat: summary records only your own latest message for your own two-person chat', async () => {
+  const sum = (uid, other, extra = {}) => ({
+    participants: [uid, other].sort(), lastText: 'hi', lastMessageAt: 1, lastSenderId: uid, ...extra,
+  });
+  const c = (uid, other) => doc(as(uid), 'chats', chatId(uid, other));
+  await assertSucceeds(setDoc(c('student', 'rep'), sum('student', 'rep')));
+  await assertSucceeds(setDoc(c('rep', 'student'), sum('rep', 'student', { lastText: 'reply' })));
+  await assertFails(setDoc(c('student', 'rep'), sum('student', 'rep', { lastSenderId: 'rep' })));   // forged sender
+  await assertFails(setDoc(c('student', 'rep'), sum('student', 'rep', { participants: ['student', 'teacher'] })));
+  await assertFails(setDoc(c('student', 'library'), sum('student', 'library')));                    // not allowed to chat
+  await assertFails(setDoc(c('teacher', 'rep'), { ...sum('teacher', 'rep'), extra: 1 }));           // extra field
+});
+
+test('chat: the list of conversations is private to its participants', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'chats', chatId('student', 'rep')), { participants: ['rep', 'student'], lastText: 'a', lastMessageAt: 1, lastSenderId: 'student' });
+    await setDoc(doc(db, 'chats', chatId('teacher', 'library')), { participants: ['library', 'teacher'], lastText: 'b', lastMessageAt: 2, lastSenderId: 'teacher' });
+  });
+  const mine = await assertSucceeds(getDocs(query(collection(as('student'), 'chats'), where('participants', 'array-contains', 'student'))));
+  if (mine.size !== 1) throw new Error(`student should see 1 chat, saw ${mine.size}`);
+  await assertFails(getDocs(query(collection(as('student'), 'chats'), where('participants', 'array-contains', 'teacher'))));
+  await assertFails(getDocs(collection(as('student'), 'chats')));
+  await assertFails(getDoc(doc(as('admin'), 'chats', chatId('student', 'rep'))));
+});
+
+test('chat: read markers are private and shaped correctly', async () => {
+  await assertSucceeds(setDoc(doc(as('student'), 'userState', 'student'), { readAt: { a_b: 5 } }, { merge: true }));
+  await assertSucceeds(getDoc(doc(as('student'), 'userState', 'student')));
+  await assertFails(getDoc(doc(as('rep'), 'userState', 'student')));
+  await assertFails(setDoc(doc(as('rep'), 'userState', 'student'), { readAt: {} }));
+  await assertFails(setDoc(doc(as('student'), 'userState', 'student'), { readAt: 'x' }));
+  await assertFails(setDoc(doc(as('student'), 'userState', 'student'), { readAt: {}, role: 'admin' }));
+  await assertFails(setDoc(doc(as('disabledAdmin'), 'userState', 'disabledAdmin'), { readAt: {} }));
 });
 
 // ---- buses -----------------------------------------------------------------
