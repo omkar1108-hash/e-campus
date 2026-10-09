@@ -9,6 +9,7 @@ import 'services/chatbot_service.dart';
 import 'services/demo_location_source.dart';
 import 'services/image_service.dart';
 import 'services/location_source.dart';
+import 'services/route_service.dart';
 import 'services/trip_controller.dart';
 
 class ECampusApp extends StatelessWidget {
@@ -17,6 +18,7 @@ class ECampusApp extends StatelessWidget {
     required this.backend,
     this.locationSource,
     this.imagePicker,
+    this.routeService,
   });
 
   final Backend backend;
@@ -26,6 +28,9 @@ class ECampusApp extends StatelessWidget {
 
   /// Where gallery / camera pictures come from (a fake one in tests).
   final ImagePickerService? imagePicker;
+
+  /// Where bus routes and travel times come from (a fake one in tests).
+  final RouteService? routeService;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +43,9 @@ class ECampusApp extends StatelessWidget {
       providers: [
         Provider<Backend>.value(value: backend),
         Provider<LocationSource>.value(value: location),
+        Provider<RouteCache>(
+          create: (_) => RouteCache(routeService ?? OsrmRouteService()),
+        ),
         Provider<ImagePickerService>.value(
           value: imagePicker ?? DeviceImagePicker(),
         ),

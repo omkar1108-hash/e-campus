@@ -571,6 +571,7 @@ class FirebaseBackend implements Backend {
       'lng': lng,
       'updatedAt': now,
       'tripStartedAt': now,
+      'leg': Bus.outbound,
     });
   }
 
@@ -585,6 +586,10 @@ class FirebaseBackend implements Backend {
   @override
   Future<void> endTrip(String busId) =>
       _buses.doc(busId).update({'active': false});
+
+  @override
+  Future<void> setBusLeg(String busId, String leg) =>
+      _buses.doc(busId).update({'leg': leg});
 
   // ---- Notices ----------------------------------------------------------
   CollectionReference<Map<String, dynamic>> get _notices =>
@@ -673,18 +678,29 @@ class FirebaseBackend implements Backend {
 
   // ---- Timetable --------------------------------------------------------
   @override
-  Stream<Map<String, List<TimetableSlot>>> watchTimetables() => _db
-      .collection('timetables')
-      .snapshots()
-      .map(
-        (s) => {
-          for (final d in s.docs)
-            d.id: [
-              for (final m in (d.data()['slots'] ?? const []) as List)
-                TimetableSlot.fromMap(Map<String, dynamic>.from(m as Map)),
-            ]..sort((a, b) => a.order.compareTo(b.order)),
-        },
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables(AppUser viewer) {
+    Map<String, List<TimetableSlot>> parse(
+      Iterable<(String, Map<String, dynamic>)> docs,
+    ) => {
+      for (final (id, data) in docs)
+        id: [
+          for (final m in (data['slots'] ?? const []) as List)
+            TimetableSlot.fromMap(Map<String, dynamic>.from(m as Map)),
+        ]..sort((a, b) => a.order.compareTo(b.order)),
+    };
+    final timetables = _db.collection('timetables');
+    // Everyone but administration may read only their own department's
+    // document, so that is all they ask for.
+    if (Rbac.isAdministration(viewer)) {
+      return timetables.snapshots().map(
+        (s) => parse([for (final d in s.docs) (d.id, d.data())]),
       );
+    }
+    return timetables.doc(viewer.department).snapshots().map((d) {
+      if (!d.exists) return <String, List<TimetableSlot>>{};
+      return parse([(d.id, d.data()!)]);
+    });
+  }
 
   @override
   Future<void> saveTimetable(String department, List<TimetableSlot> slots) =>

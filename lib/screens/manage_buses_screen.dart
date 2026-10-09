@@ -6,6 +6,7 @@ import '../models/app_user.dart';
 import '../models/bus.dart';
 import '../services/backend.dart';
 import '../utils/bus_status.dart';
+import '../widgets/stop_field.dart';
 
 /// Admin / admin staff: create buses, assign a driver and the departments
 /// that may track each bus.
@@ -104,9 +105,9 @@ class ManageBusesScreen extends StatelessWidget {
                           subtitle: Text(
                             '${driverName(b.driverUid)}\n'
                             'Departments: ${b.departments.join(', ')}\n'
+                            '${b.hasRoute ? 'Route: ${b.start!.name} ⇄ ${b.end!.name}\n' : 'No route set\n'}'
                             '${busStatus(b, DateTime.now())}',
                           ),
-                          isThreeLine: true,
                           onTap: () => _edit(context, b, buses, users),
                           trailing: IconButton(
                             tooltip: 'Delete',
@@ -146,9 +147,14 @@ class _BusFormDialogState extends State<_BusFormDialog> {
   late String? _driver = widget.bus?.driverUid;
   late final Set<String> _departments = {...?widget.bus?.departments};
   bool _showDeptError = false;
+  bool _showRouteError = false;
+  late final _start = StopFieldController(widget.bus?.start);
+  late final _end = StopFieldController(widget.bus?.end);
 
   @override
   void dispose() {
+    _start.dispose();
+    _end.dispose();
     _name.dispose();
     _plate.dispose();
     super.dispose();
@@ -232,6 +238,27 @@ class _BusFormDialogState extends State<_BusFormDialog> {
                     ),
                 ],
               ),
+              const Divider(height: 32),
+              Text('Route', style: Theme.of(context).textTheme.titleMedium),
+              const Text(
+                'The bus runs from the start point to the end point, and '
+                'turns back automatically on arrival. Travel time is '
+                'calculated for you.',
+              ),
+              const SizedBox(height: 12),
+              StopField(title: 'Start point', controller: _start),
+              const SizedBox(height: 16),
+              StopField(title: 'End point', controller: _end),
+              if (_showRouteError)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Set both the start and the end point, or leave both empty',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
               if (_showDeptError)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -259,6 +286,11 @@ class _BusFormDialogState extends State<_BusFormDialog> {
               return;
             }
             if (!valid) return;
+            // Both route points or neither.
+            if (_start.isEmpty != _end.isEmpty) {
+              setState(() => _showRouteError = true);
+              return;
+            }
             final base = widget.bus ?? const Bus(id: '', name: '', plate: '');
             Navigator.pop(
               context,
@@ -268,6 +300,9 @@ class _BusFormDialogState extends State<_BusFormDialog> {
                 driverUid: _driver,
                 clearDriver: _driver == null,
                 departments: _departments.toList()..sort(),
+                start: _start.stop,
+                end: _end.stop,
+                clearRoute: _start.isEmpty,
               ),
             );
           },

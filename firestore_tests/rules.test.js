@@ -97,9 +97,9 @@ test('admin creates every role except class rep', async () => {
 });
 
 test('admin staff creates only library staff, teachers, students and drivers', async () => {
-  for (const role of ['grievanceCommittee', 'libraryStaff', 'hod', 'teacher', 'student', 'busDriver'])
+  for (const role of ['grievanceCommittee', 'libraryStaff', 'teacher', 'student', 'busDriver'])
     await assertSucceeds(setDoc(doc(as('staff'), 'users', `n-${role}`), newUser(role)));
-  for (const role of ['admin', 'adminStaff', 'classRep'])
+  for (const role of ['admin', 'adminStaff', 'classRep', 'hod'])
     await assertFails(setDoc(doc(as('staff'), 'users', `n-${role}`), newUser(role)));
 });
 
@@ -704,18 +704,50 @@ test('alerts: reach only the chosen branches and groups', async () => {
 
 const SLOT = { day: 'Mon', start: '09:00', end: '10:00', subject: 'S', teacherUid: 'teacher', teacherName: 'T', room: 'R' };
 
-test('timetable: admin side edits, everyone but drivers reads', async () => {
+test('timetable: only the department\'s head of department writes it', async () => {
   const data = { slots: [SLOT], updatedAt: 1 };
-  for (const uid of ['admin', 'staff'])
-    await assertSucceeds(setDoc(doc(as(uid), 'timetables', 'MCA'), data));
-  for (const uid of ['teacher', 'student', 'library', 'committee', 'driver'])
+  await assertSucceeds(setDoc(doc(as('hod'), 'timetables', 'MCA'), data));
+  await assertSucceeds(setDoc(doc(as('hodMBA'), 'timetables', 'MBA'), data));
+  // Not another department's.
+  await assertFails(setDoc(doc(as('hod'), 'timetables', 'MBA'), data));
+  await assertFails(setDoc(doc(as('hodMBA'), 'timetables', 'MCA'), data));
+  // Nobody else, administration included.
+  for (const uid of ['admin', 'staff', 'teacher', 'student', 'rep', 'library', 'committee', 'driver'])
     await assertFails(setDoc(doc(as(uid), 'timetables', 'MCA'), data));
-  await assertFails(setDoc(doc(as('admin'), 'timetables', 'MCA'), { ...data, extra: 1 }));
-  await assertFails(setDoc(doc(as('admin'), 'timetables', 'MCA'), { slots: Array(201).fill(SLOT), updatedAt: 1 }));
-  for (const uid of ['teacher', 'student', 'committee'])
+  await assertFails(setDoc(doc(as('hod'), 'timetables', 'MCA'), { ...data, extra: 1 }));
+  await assertFails(setDoc(doc(as('hod'), 'timetables', 'MCA'), { slots: Array(201).fill(SLOT), updatedAt: 1 }));
+  await assertFails(deleteDoc(doc(as('hod'), 'timetables', 'MCA')));
+});
+
+test('timetable: read by the department\'s members and by administration', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    await setDoc(doc(c.firestore(), 'timetables', 'MCA'), { slots: [SLOT], updatedAt: 1 });
+    await setDoc(doc(c.firestore(), 'timetables', 'MBA'), { slots: [SLOT], updatedAt: 1 });
+  });
+  for (const uid of ['student', 'rep', 'teacher', 'hod', 'admin', 'staff'])
     await assertSucceeds(getDoc(doc(as(uid), 'timetables', 'MCA')));
-  await assertFails(getDoc(doc(as('driver'), 'timetables', 'MCA')));
-  await assertFails(deleteDoc(doc(as('admin'), 'timetables', 'MCA')));
+  // Other departments' people, and roles without a department timetable.
+  for (const uid of ['studentMBA', 'repMBA', 'teacherMBA', 'hodMBA', 'library', 'committee', 'driver'])
+    await assertFails(getDoc(doc(as(uid), 'timetables', 'MCA')));
+  await assertSucceeds(getDoc(doc(as('studentMBA'), 'timetables', 'MBA')));
+  await assertSucceeds(getDocs(collection(as('admin'), 'timetables')));
+  await assertSucceeds(getDocs(collection(as('staff'), 'timetables')));
+  for (const uid of ['student', 'teacher', 'hod'])
+    await assertFails(getDocs(collection(as(uid), 'timetables')));
+  await assertFails(getDoc(doc(anon(), 'timetables', 'MCA')));
+});
+
+test('only the administrator appoints or removes a head of department', async () => {
+  await assertSucceeds(setDoc(doc(as('admin'), 'users', 'n-hod'), newUser('hod')));
+  await assertFails(setDoc(doc(as('staff'), 'users', 'n-hod2'), newUser('hod')));
+  await assertFails(updateDoc(doc(as('staff'), 'users', 'student'), { role: 'hod' }));
+  await assertFails(updateDoc(doc(as('staff'), 'users', 'teacher'), { role: 'hod' }));
+  await assertSucceeds(updateDoc(doc(as('admin'), 'users', 'teacher'), { role: 'hod' }));
+  // Admin staff cannot demote one, though they can still disable the account.
+  await assertFails(updateDoc(doc(as('staff'), 'users', 'hod'), { role: 'teacher' }));
+  await assertFails(updateDoc(doc(as('staff'), 'users', 'hod'), { role: 'student' }));
+  await assertSucceeds(updateDoc(doc(as('staff'), 'users', 'hod'), { active: false }));
+  await assertSucceeds(updateDoc(doc(as('admin'), 'users', 'hodMBA'), { role: 'teacher' }));
 });
 
 const WORK = {
@@ -995,4 +1027,48 @@ test('committee: tracks all buses and may chat with staff but not students', asy
   await assertFails(setDoc(doc(as('committee'), 'chats', ids('committee', 'student')), {
     participants: [ 'committee', 'student' ].sort(), lastText: 'hi', lastMessageAt: 1, lastSenderId: 'committee',
   }));
+});
+
+// ---- bus routes -------------------------------------------------------------
+const ROUTE = { startName: 'A', startLat: 17.7, startLng: 83.3, endName: 'B', endLat: 17.8, endLng: 83.4 };
+
+test('buses: administration sets the route, drivers cannot', async () => {
+  const bus = (uid) => doc(as(uid), 'buses', 'busMCA');
+  await assertSucceeds(updateDoc(bus('admin'), ROUTE));
+  await assertSucceeds(updateDoc(bus('staff'), { ...ROUTE, endName: 'C' }));
+  // Clearing it again is fine.
+  await assertSucceeds(updateDoc(bus('admin'), { startName: null, startLat: null, startLng: null, endName: null, endLat: null, endLng: null }));
+  await assertFails(updateDoc(bus('driver'), ROUTE));
+  for (const uid of ['teacher', 'student', 'hod']) await assertFails(updateDoc(bus(uid), ROUTE));
+});
+
+test('buses: a route needs both points with sane coordinates', async () => {
+  const bus = doc(as('admin'), 'buses', 'busMCA');
+  await assertFails(updateDoc(bus, { startName: 'A', startLat: 17.7, startLng: 83.3 }));
+  await assertFails(updateDoc(bus, { ...ROUTE, startLat: 95 }));
+  await assertFails(updateDoc(bus, { ...ROUTE, endLng: 181 }));
+  await assertFails(updateDoc(bus, { ...ROUTE, endLat: 'north' }));
+  await assertFails(updateDoc(bus, { ...ROUTE, startLng: null }));
+});
+
+test('buses: a new bus may be created with a route', async () => {
+  const data = {
+    name: 'B', plate: 'P', driverUid: null, departments: ['MCA'], active: false, ...ROUTE,
+  };
+  await assertSucceeds(addDoc(collection(as('admin'), 'buses'), data));
+  await assertFails(addDoc(collection(as('admin'), 'buses'), { ...data, startLat: 100 }));
+  await assertSucceeds(addDoc(collection(as('staff'), 'buses'), {
+    ...data, startName: null, startLat: null, startLng: null, endName: null, endLat: null, endLng: null,
+  }));
+});
+
+test('buses: the assigned driver switches the leg on arrival, only to a valid value', async () => {
+  const bus = (uid) => doc(as(uid), 'buses', 'busMCA');
+  await assertSucceeds(updateDoc(bus('driver'), { leg: 'return' }));
+  await assertSucceeds(updateDoc(bus('driver'), { leg: 'outbound' }));
+  await assertSucceeds(updateDoc(bus('driver'), { active: true, lat: 1, lng: 2, updatedAt: 3, tripStartedAt: 3, leg: 'outbound' }));
+  await assertFails(updateDoc(bus('driver'), { leg: 'sideways' }));
+  await assertFails(updateDoc(bus('driver2'), { leg: 'return' }));
+  for (const uid of ['admin', 'staff', 'teacher', 'student'])
+    await assertFails(updateDoc(bus(uid), { leg: 'return' }));
 });

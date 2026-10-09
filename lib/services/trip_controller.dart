@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/bus.dart';
 import 'backend.dart';
 import 'location_source.dart';
 
@@ -17,6 +18,8 @@ class TripController extends ChangeNotifier {
 
   StreamSubscription<GeoFix>? _sub;
   String? _busId;
+  Bus? _bus;
+  String _leg = Bus.outbound;
   bool _busy = false;
   String? _error;
 
@@ -26,7 +29,12 @@ class TripController extends ChangeNotifier {
   /// Whether this phone is currently sending positions for [busId].
   bool isTracking(String busId) => _sub != null && _busId == busId;
 
-  Future<void> start(String busId) async {
+  /// Which leg of its route the bus is on (outbound / return).
+  String get leg => _leg;
+
+  /// [bus] lets the trip switch to the return route on its own when the
+  /// phone reaches the end of a leg.
+  Future<void> start(String busId, {Bus? bus}) async {
     if (_busy) return;
     _busy = true;
     _error = null;
@@ -37,10 +45,13 @@ class TripController extends ChangeNotifier {
       // Cancelling takes effect immediately; there is nothing to wait for.
       unawaited(_sub?.cancel());
       _busId = busId;
+      _bus = bus;
+      _leg = Bus.outbound;
       _sub = location.track().listen(
         (f) async {
           try {
             await backend.updateTripLocation(busId, f.lat, f.lng);
+            await _checkArrival(busId, f);
           } catch (_) {
             _error = 'Could not send the bus position. Check your internet.';
             notifyListeners();
@@ -61,6 +72,19 @@ class TripController extends ChangeNotifier {
     }
   }
 
+  /// When the bus reaches the end of its leg, start the way back.
+  Future<void> _checkArrival(String busId, GeoFix f) async {
+    final bus = _bus;
+    if (bus == null || !bus.canAutoSwitch) return;
+    final to = _leg == Bus.returning ? bus.start! : bus.end!;
+    if (distanceMeters(f.lat, f.lng, to.lat, to.lng) > Bus.arrivalRadius)
+      return;
+    final next = _leg == Bus.returning ? Bus.outbound : Bus.returning;
+    _leg = next;
+    await backend.setBusLeg(busId, next);
+    notifyListeners();
+  }
+
   Future<void> end(String busId) async {
     if (_busy) return;
     _busy = true;
@@ -70,6 +94,7 @@ class TripController extends ChangeNotifier {
       unawaited(_sub?.cancel());
       _sub = null;
       _busId = null;
+      _bus = null;
       await backend.endTrip(busId);
     } catch (e) {
       _error = 'Could not end the trip: $e';

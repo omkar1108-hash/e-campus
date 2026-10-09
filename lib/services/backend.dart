@@ -127,6 +127,10 @@ abstract class Backend {
   Future<void> updateTripLocation(String busId, double lat, double lng);
   Future<void> endTrip(String busId);
 
+  /// Driver: switch between the outbound and return leg of the route
+  /// (done automatically on arrival at a stop).
+  Future<void> setBusLeg(String busId, String leg);
+
   // ---- Notices ----------------------------------------------------------
   /// Notices aimed at [viewer], newest first (admin and admin staff see all).
   Stream<List<Notice>> watchNotices(AppUser viewer);
@@ -147,8 +151,11 @@ abstract class Backend {
   Future<void> clearAlert(String id);
 
   // ---- Timetable --------------------------------------------------------
-  /// Slots of every department, keyed by department.
-  Stream<Map<String, List<TimetableSlot>>> watchTimetables();
+  /// Timetable slots keyed by department: the viewer's own department for
+  /// students and teachers, every department for admin and admin staff.
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables(AppUser viewer);
+
+  /// Head of department of [department] only.
   Future<void> saveTimetable(String department, List<TimetableSlot> slots);
 
   // ---- Assignments & notes ------------------------------------------------

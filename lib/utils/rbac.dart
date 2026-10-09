@@ -97,10 +97,10 @@ class Rbac {
           UserRole.busDriver,
         ];
       case UserRole.adminStaff:
+        // Only the administrator appoints heads of department.
         return const [
           UserRole.grievanceCommittee,
           UserRole.libraryStaff,
-          UserRole.hod,
           UserRole.teacher,
           UserRole.student,
           UserRole.busDriver,
@@ -123,13 +123,16 @@ class Rbac {
   /// Roles [actor] may set on [target] (always includes the current role).
   static List<UserRole> rolesAssignableBy(AppUser actor, AppUser target) {
     if (!canEditUser(actor, target)) return [target.role];
+    // Admin staff can neither appoint nor remove a head of department.
+    if (actor.role == UserRole.adminStaff && target.role == UserRole.hod) {
+      return [UserRole.hod];
+    }
     final base = actor.role == UserRole.admin
         ? UserRole.values.toList()
         : const [
             UserRole.student,
             UserRole.classRep,
             UserRole.teacher,
-            UserRole.hod,
             UserRole.grievanceCommittee,
             UserRole.libraryStaff,
             UserRole.busDriver,
@@ -145,6 +148,9 @@ class Rbac {
   static bool isStudent(AppUser u) =>
       u.role == UserRole.student || u.role == UserRole.classRep;
 
+  /// Admin and admin staff.
+  static bool isAdministration(AppUser u) => _isAdminSide(u);
+
   static bool _isAdminSide(AppUser u) =>
       _is(u, {UserRole.admin, UserRole.adminStaff});
 
@@ -154,8 +160,12 @@ class Rbac {
 
   /// Notices: drivers read the ones aimed at them.
   static bool canSeeAllNotices(AppUser u) => _isAdminSide(u);
-  static bool canViewTimetable(AppUser u) => u.role != UserRole.busDriver;
-  static bool canEditTimetable(AppUser u) => _isAdminSide(u);
+
+  /// A department's timetable is seen by its students and teachers (and by
+  /// administration, read only) and written only by its head of department.
+  static bool canViewTimetable(AppUser u) =>
+      isStudent(u) || u.role.isTeaching || _isAdminSide(u);
+  static bool canEditTimetable(AppUser u) => u.role == UserRole.hod;
   static bool canSearch(AppUser u) => u.role != UserRole.busDriver;
 
   /// Teachers mark attendance and post assignments / notes; students see

@@ -270,6 +270,8 @@ class DemoBackend implements Backend {
       plate: 'MH 04 AB 1234',
       driverUid: 'u-driver',
       departments: ['MCA', 'MBA'],
+      start: BusStop(name: 'Gajuwaka Gate', lat: 17.7231, lng: 83.3013),
+      end: BusStop(name: 'College Campus', lat: 17.7330, lng: 83.3140),
     );
     _buses['bus2'] = const Bus(
       id: 'bus2',
@@ -718,10 +720,14 @@ class DemoBackend implements Backend {
         plate: bus.plate,
         driverUid: bus.driverUid,
         departments: bus.departments,
+        start: bus.start,
+        end: bus.end,
       );
     } else {
       final old = _buses[bus.id];
       if (old == null) return;
+      // Live trip fields stay; the configuration (including a changed or
+      // removed route) comes from [bus].
       _buses[bus.id] = Bus(
         id: bus.id,
         name: bus.name,
@@ -733,6 +739,9 @@ class DemoBackend implements Backend {
         lng: old.lng,
         updatedAt: old.updatedAt,
         tripStartedAt: old.tripStartedAt,
+        start: bus.start,
+        end: bus.end,
+        leg: old.leg,
       );
     }
     _busCtl.add(null);
@@ -752,17 +761,14 @@ class DemoBackend implements Backend {
     double? lat,
     double? lng,
     DateTime? started,
-  }) => Bus(
-    id: b.id,
-    name: b.name,
-    plate: b.plate,
-    driverUid: b.driverUid,
-    departments: b.departments,
+    String? leg,
+  }) => b.copyWith(
     active: active,
-    lat: lat ?? b.lat,
-    lng: lng ?? b.lng,
+    lat: lat,
+    lng: lng,
     updatedAt: lat == null ? b.updatedAt : DateTime.now(),
-    tripStartedAt: started ?? b.tripStartedAt,
+    tripStartedAt: started,
+    leg: leg,
   );
 
   @override
@@ -775,7 +781,16 @@ class DemoBackend implements Backend {
       lat: lat,
       lng: lng,
       started: DateTime.now(),
+      leg: Bus.outbound,
     );
+    _busCtl.add(null);
+  }
+
+  @override
+  Future<void> setBusLeg(String busId, String leg) async {
+    final b = _buses[busId];
+    if (b == null) return;
+    _buses[busId] = b.copyWith(leg: leg);
     _busCtl.add(null);
   }
 
@@ -898,13 +913,16 @@ class DemoBackend implements Backend {
 
   // ---- Timetable --------------------------------------------------------
   @override
-  Stream<Map<String, List<TimetableSlot>>> watchTimetables() => _live(
-    _campusCtl.stream,
-    () => {
-      for (final e in _timetables.entries)
-        e.key: (List.of(e.value)..sort((a, b) => a.order.compareTo(b.order))),
-    },
-  );
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables(AppUser viewer) =>
+      _live(
+        _campusCtl.stream,
+        () => {
+          for (final e in _timetables.entries)
+            if (Rbac.isAdministration(viewer) || e.key == viewer.department)
+              e.key: (List.of(e.value)
+                ..sort((a, b) => a.order.compareTo(b.order))),
+        },
+      );
 
   @override
   Future<void> saveTimetable(
