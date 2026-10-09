@@ -57,16 +57,15 @@ void main() {
         UserRole.student,
         UserRole.classRep,
         UserRole.teacher,
-        UserRole.admin,
-        UserRole.adminStaff,
       });
     });
 
-    test('assignments are deleted by the author or administration', () {
+    test('assignments are deleted only by their author', () {
       final t = _u(UserRole.teacher);
       expect(Rbac.canDeleteAssignment(t, 'teacher'), isTrue);
       expect(Rbac.canDeleteAssignment(t, 'someone-else'), isFalse);
-      expect(Rbac.canDeleteAssignment(_u(UserRole.adminStaff), 'x'), isTrue);
+      expect(Rbac.canDeleteAssignment(_u(UserRole.adminStaff), 'x'), isFalse);
+      expect(Rbac.canDeleteAssignment(_u(UserRole.admin), 'x'), isFalse);
       expect(
         Rbac.canDeleteAssignment(_u(UserRole.student), 'student'),
         isFalse,

@@ -22,6 +22,7 @@ Future<void> tapButton(WidgetTester t, String label) async {
 }
 
 void main() {
+  assignmentAccessTests();
   backTests();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -585,5 +586,25 @@ void backTests() {
     await t.binding.handlePopRoute();
     await t.pump();
     expect(find.text('Press back again to exit'), findsOneWidget);
+  });
+}
+
+void assignmentAccessTests() {
+  testWidgets('administration has no assignments section', (t) async {
+    await startApp(t);
+    for (final who in ['admin', 'staff', 'library', 'committee', 'driver']) {
+      await login(t, '$who@ecampus.demo');
+      await openDrawer(t);
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.text('Assignments'),
+        ),
+        findsNothing,
+        reason: who,
+      );
+      await t.tap(find.text('Sign out'));
+      await t.pumpAndSettle();
+    }
   });
 }

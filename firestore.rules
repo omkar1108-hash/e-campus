@@ -215,9 +215,8 @@ service cloud.firestore {
     // ---- Assignments & notes ---------------------------------------------
     // Teachers post links; students read their own department's items.
     match /assignments/{id} {
-      allow read: if active() && role() != 'busDriver'
-                  && (role() in ['admin', 'adminStaff']
-                      || resource.data.get('createdBy', '') == request.auth.uid
+      allow read: if active() && role() in ['teacher', 'student', 'classRep']
+                  && (resource.data.get('createdBy', '') == request.auth.uid
                       || resource.data.get('department', '') == profile().department);
       allow create: if isTeacher()
                     && request.resource.data.keys().hasOnly(
@@ -235,8 +234,7 @@ service cloud.firestore {
                     && request.resource.data.subject is string
                     && request.resource.data.subject.size() <= 100;
       allow update: if false;
-      allow delete: if isAdmin() || isAdminStaff()
-                    || (isTeacher() && resource.data.get('createdBy', '') == request.auth.uid);
+      allow delete: if isTeacher() && resource.data.get('createdBy', '') == request.auth.uid;
     }
 
     // ---- Attendance ----------------------------------------------------
