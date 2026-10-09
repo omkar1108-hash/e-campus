@@ -1,6 +1,6 @@
 import '../models/app_user.dart';
 import '../models/book.dart';
-import '../models/bus_location.dart';
+import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
 
@@ -66,9 +66,19 @@ abstract class Backend {
   Stream<List<ChatMessage>> watchMessages(String chatId);
   Future<void> sendMessage(String chatId, ChatMessage message);
 
-  // ---- Bus tracking -----------------------------------------------------
-  Stream<BusLocation?> watchBus();
-  Future<void> updateBus(BusLocation location);
+  // ---- Buses ------------------------------------------------------------
+  /// Buses [viewer] may see: staff roles see all, students see buses
+  /// assigned to their department, a driver sees their own bus.
+  Stream<List<Bus>> watchBuses(AppUser viewer);
+
+  /// Creates (empty id) or updates a bus's configuration. Admin / admin staff.
+  Future<void> saveBus(Bus bus);
+  Future<void> deleteBus(String id);
+
+  // Driver trip controls (only the assigned driver may call these).
+  Future<void> startTrip(String busId, double lat, double lng);
+  Future<void> updateTripLocation(String busId, double lat, double lng);
+  Future<void> endTrip(String busId);
 }
 
 /// Deterministic id for a one-to-one chat between two users.

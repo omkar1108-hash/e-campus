@@ -13,7 +13,8 @@ class representatives, teachers and administrators.
 | Account management | Admin / admin staff create, edit and **disable** accounts (Manage Users). Disabled people cannot sign in |
 | Class representatives | Teachers pick them for their own department: at most 2 girls and 2 boys |
 | E-Library | Search, read/download books (link-based); teachers, library staff, admin staff and admin add and remove books |
-| Bus tracking | Live bus marker on Google Maps; the bus driver shares phone GPS |
+| Bus tracking | Several buses, each with a driver and the departments allowed to track it. Drivers **start / end a trip** and share their phone's GPS. Google Maps on Android / iOS, OpenStreetMap map on Windows, macOS, Linux and web |
+| Manage buses | Admin / admin staff add buses, assign a driver and choose the departments that can track each bus |
 | Chat | One-to-one chat (Cloud Firestore, real time) |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
 | Tech news | Class reps / teachers / admin staff / admin post; everyone but drivers reads their own department's news |
@@ -22,12 +23,14 @@ class representatives, teachers and administrators.
 
 | Capability | Student | Class Rep | Teacher | Library staff | Bus driver | Admin staff | Admin |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Chat, track bus | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Chat | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | Library, chatbot, read news | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
 | Post news (own department) | | ✔ | ✔ | | | ✔ | ✔ (any) |
 | Delete news | | own dept | own dept | | | any | any |
 | Add / remove books | | | ✔ | ✔ | | ✔ | ✔ |
-| Share bus location | | | | | ✔ | | |
+| Start / end a bus trip (share location) | | | | | ✔ (own bus) | | |
+| Track buses | own dept | own dept | all | all | own bus | all | all |
+| Add buses, assign drivers / departments | | | | | | ✔ | ✔ |
 | Choose class reps (own dept) | | | ✔ | | | | |
 | Create / edit / disable accounts | | | | | | all but admins | all but self |
 | Create accounts of role | | | | | | library, teacher, student, driver | any except class rep |
@@ -35,7 +38,7 @@ class representatives, teachers and administrators.
 ## Run it right now (demo mode)
 
 No setup is needed. If Firebase is not configured the app falls back to an
-in-memory backend with seeded data and a moving simulated bus:
+in-memory backend with seeded data (a driver can start a simulated trip):
 
 ```bash
 flutter pub get
@@ -72,7 +75,7 @@ lib/
   main.dart                 Picks Firebase or demo backend
   app.dart                  Providers, theme, auth gate
   config/app_config.dart    Departments, Gemini settings
-  models/                   AppUser (+roles), Book, NewsItem, ChatMessage, BusLocation
+  models/                   AppUser (+roles), Book, NewsItem, ChatMessage, Bus
   services/
     backend.dart            Data-source interface
     firebase_backend.dart   Firebase Auth + Firestore implementation
@@ -80,7 +83,7 @@ lib/
     auth_controller.dart    Sign-in / sign-up state
     chatbot_service.dart    Gemini API client
   screens/                  login, otp, register, home (drawer), dashboard,
-                            library, bus, people, chat, chatbot, news, users admin
+                            library, bus (+ manage buses), people, chat, chatbot, news, manage users
   utils/rbac.dart           Permission rules
 firestore.rules             Server-side RBAC
 firestore_tests/            Rules tests (Firebase emulator): `cd firestore_tests && npm install && npm test`

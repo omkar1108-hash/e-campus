@@ -42,7 +42,12 @@ class Rbac {
   });
 
   // ---- Bus --------------------------------------------------------------
+  /// Only drivers start and end trips (and so publish the location).
   static bool canShareBusLocation(AppUser u) => u.role == UserRole.busDriver;
+
+  /// Admin and admin staff create buses, assign drivers and departments.
+  static bool canManageBuses(AppUser u) =>
+      _is(u, {UserRole.admin, UserRole.adminStaff});
 
   // ---- Accounts ---------------------------------------------------------
   static bool canManageUsers(AppUser u) =>

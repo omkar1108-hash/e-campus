@@ -8,8 +8,9 @@ const {
   assertSucceeds,
   assertFails,
 } = require('@firebase/rules-unit-testing');
-const { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection } =
-  require('firebase/firestore');
+const {
+  doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, getDocs,
+} = require('firebase/firestore');
 
 let env;
 
@@ -26,6 +27,7 @@ const USERS = {
   teacherMBA: user('teacher', { department: 'MBA' }),
   library: user('libraryStaff'),
   driver: user('busDriver'),
+  driver2: user('busDriver'),
   student: user('student', { gender: 'female' }),
   studentMBA: user('student', { department: 'MBA', gender: 'male' }),
   rep: user('classRep'),
@@ -55,7 +57,12 @@ beforeEach(async () => {
     await setDoc(doc(db, 'books', 'b1'), { title: 'T', author: 'A', category: 'C', url: 'https://x.y' });
     await setDoc(doc(db, 'news', 'n-mca'), { title: 'T', body: 'B', department: 'MCA', authorName: 'a', createdAt: 1 });
     await setDoc(doc(db, 'news', 'n-mba'), { title: 'T', body: 'B', department: 'MBA', authorName: 'a', createdAt: 1 });
-    await setDoc(doc(db, 'bus', 'current'), { lat: 1, lng: 2, updatedAt: 3 });
+    await setDoc(doc(db, 'buses', 'busMCA'), {
+      name: 'Bus 1', plate: 'P1', driverUid: 'driver', departments: ['MCA', 'MBA'], active: false,
+    });
+    await setDoc(doc(db, 'buses', 'busCivil'), {
+      name: 'Bus 2', plate: 'P2', driverUid: 'driver2', departments: ['Civil'], active: false,
+    });
   });
 });
 
@@ -230,12 +237,93 @@ test('chat: only the two participants, and no spoofed senders', async () => {
   await assertFails(getDoc(doc(anon(), 'chats', chat, 'messages', 'any')));
 });
 
-// ---- bus -------------------------------------------------------------------
-test('bus: everyone reads, only drivers write', async () => {
-  for (const uid of ['student', 'driver', 'admin', 'teacher'])
-    await assertSucceeds(getDoc(doc(as(uid), 'bus', 'current')));
-  await assertFails(getDoc(doc(anon(), 'bus', 'current')));
-  await assertSucceeds(setDoc(doc(as('driver'), 'bus', 'current'), { lat: 5, lng: 6, updatedAt: 7 }));
-  for (const uid of ['admin', 'staff', 'student', 'teacher'])
-    await assertFails(setDoc(doc(as(uid), 'bus', 'current'), { lat: 5, lng: 6, updatedAt: 7 }));
+// ---- buses -----------------------------------------------------------------
+const buses = (db) => collection(db, 'buses');
+const newBus = (extra = {}) => ({
+  name: 'Bus 3', plate: 'P3', driverUid: null, departments: ['MCA'], active: false, ...extra,
+});
+
+test('buses: students read only buses of their department', async () => {
+  await assertSucceeds(getDoc(doc(as('student'), 'buses', 'busMCA')));
+  await assertFails(getDoc(doc(as('student'), 'buses', 'busCivil')));
+  await assertSucceeds(getDocs(query(buses(as('student')), where('departments', 'array-contains', 'MCA'))));
+  // The query the app really sends for each student.
+  const mine = await assertSucceeds(
+    getDocs(query(buses(as('studentMBA')), where('departments', 'array-contains', 'MBA'))));
+  if (mine.size !== 1) throw new Error(`expected 1 bus for MBA, got ${mine.size}`);
+  // Asking for another department's buses, or for everything, is refused.
+  await assertFails(getDocs(query(buses(as('student')), where('departments', 'array-contains', 'Civil'))));
+  await assertFails(getDocs(buses(as('student'))));
+  await assertSucceeds(getDoc(doc(as('rep'), 'buses', 'busMCA')));
+  await assertFails(getDoc(doc(as('repMBA'), 'buses', 'busCivil')));
+});
+
+test('buses: admin, admin staff, teachers and library staff see every bus', async () => {
+  for (const uid of ['admin', 'staff', 'teacher', 'library']) {
+    const all = await assertSucceeds(getDocs(buses(as(uid))));
+    if (all.size !== 2) throw new Error(`${uid} saw ${all.size} buses`);
+  }
+});
+
+test('buses: a driver sees only their own bus', async () => {
+  await assertSucceeds(getDoc(doc(as('driver'), 'buses', 'busMCA')));
+  await assertFails(getDoc(doc(as('driver'), 'buses', 'busCivil')));
+  await assertSucceeds(getDocs(query(buses(as('driver')), where('driverUid', '==', 'driver'))));
+  await assertFails(getDocs(buses(as('driver'))));
+});
+
+test('buses: signed-out and disabled users see nothing', async () => {
+  await assertFails(getDoc(doc(anon(), 'buses', 'busMCA')));
+  await assertFails(getDocs(buses(as('disabledAdmin'))));
+});
+
+test('buses: only admin and admin staff create them, inactive and well formed', async () => {
+  for (const uid of ['admin', 'staff'])
+    await assertSucceeds(addDoc(buses(as(uid)), newBus()));
+  for (const uid of ['teacher', 'library', 'driver', 'student', 'rep'])
+    await assertFails(addDoc(buses(as(uid)), newBus()));
+  await assertFails(addDoc(buses(as('admin')), newBus({ active: true })));
+  await assertFails(addDoc(buses(as('admin')), newBus({ lat: 1, lng: 2 })));
+});
+
+test('buses: administration edits configuration but cannot run a trip', async () => {
+  for (const uid of ['admin', 'staff']) {
+    await assertSucceeds(updateDoc(doc(as(uid), 'buses', 'busMCA'), {
+      name: 'Renamed', plate: 'Z', driverUid: 'driver2', departments: ['MCA'],
+    }));
+    await assertFails(updateDoc(doc(as(uid), 'buses', 'busMCA'), { active: true }));
+    await assertFails(updateDoc(doc(as(uid), 'buses', 'busMCA'), { lat: 1, lng: 2, updatedAt: 3 }));
+  }
+  for (const uid of ['teacher', 'library', 'student', 'rep', 'driver'])
+    await assertFails(updateDoc(doc(as(uid), 'buses', 'busMCA'), { name: 'x' }));
+});
+
+test('buses: only the assigned driver runs the trip', async () => {
+  const bus = (uid) => doc(as(uid), 'buses', 'busMCA');
+  await assertSucceeds(updateDoc(bus('driver'), { active: true, lat: 1, lng: 2, updatedAt: 3, tripStartedAt: 3 }));
+  await assertSucceeds(updateDoc(bus('driver'), { lat: 1.1, lng: 2.1, updatedAt: 4 }));
+  await assertSucceeds(updateDoc(bus('driver'), { active: false }));
+  await assertFails(updateDoc(bus('driver2'), { active: true, lat: 1, lng: 2, updatedAt: 3 }));
+  for (const uid of ['admin', 'staff', 'teacher', 'student'])
+    await assertFails(updateDoc(bus(uid), { active: true, lat: 1, lng: 2, updatedAt: 3 }));
+});
+
+test('buses: a driver cannot reassign or reconfigure the bus', async () => {
+  const bus = doc(as('driver'), 'buses', 'busMCA');
+  await assertFails(updateDoc(bus, { driverUid: 'driver2' }));
+  await assertFails(updateDoc(bus, { departments: ['Civil'] }));
+  await assertFails(updateDoc(bus, { name: 'Mine' }));
+  await assertFails(updateDoc(bus, { active: true, name: 'Mine' }));
+});
+
+test('buses: only administration deletes', async () => {
+  await assertSucceeds(deleteDoc(doc(as('admin'), 'buses', 'busMCA')));
+  await assertSucceeds(deleteDoc(doc(as('staff'), 'buses', 'busCivil')));
+  await assertFails(deleteDoc(doc(as('driver'), 'buses', 'busMCA')));
+  await assertFails(deleteDoc(doc(as('teacher'), 'buses', 'busMCA')));
+});
+
+test('the old single "bus" collection is no longer accessible', async () => {
+  await assertFails(getDoc(doc(as('admin'), 'bus', 'current')));
+  await assertFails(setDoc(doc(as('driver'), 'bus', 'current'), { lat: 1 }));
 });

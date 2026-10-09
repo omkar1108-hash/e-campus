@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
 import '../models/book.dart';
-import '../models/bus_location.dart';
+import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
 import 'backend.dart';
@@ -272,16 +272,66 @@ class FirebaseBackend implements Backend {
   Future<void> sendMessage(String chatId, ChatMessage message) =>
       _messages(chatId).add(message.toMap());
 
-  // ---- Bus --------------------------------------------------------------
-  DocumentReference<Map<String, dynamic>> get _bus =>
-      _db.collection('bus').doc('current');
+  // ---- Buses ------------------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _buses =>
+      _db.collection('buses');
 
   @override
-  Stream<BusLocation?> watchBus() => _bus.snapshots().map((d) {
-    final data = d.data();
-    return data == null ? null : BusLocation.fromMap(data);
-  });
+  Stream<List<Bus>> watchBuses(AppUser viewer) {
+    // The query must match what the security rules allow this role to read.
+    final Query<Map<String, dynamic>> query;
+    switch (viewer.role) {
+      case UserRole.admin:
+      case UserRole.adminStaff:
+      case UserRole.teacher:
+      case UserRole.libraryStaff:
+        query = _buses;
+      case UserRole.busDriver:
+        query = _buses.where('driverUid', isEqualTo: viewer.uid);
+      case UserRole.student:
+      case UserRole.classRep:
+        query = _buses.where('departments', arrayContains: viewer.department);
+    }
+    return query.snapshots().map(
+      (s) =>
+          s.docs.map((d) => Bus.fromMap(d.id, d.data())).toList()
+            ..sort((a, b) => a.name.compareTo(b.name)),
+    );
+  }
 
   @override
-  Future<void> updateBus(BusLocation location) => _bus.set(location.toMap());
+  Future<void> saveBus(Bus bus) async {
+    if (bus.id.isEmpty) {
+      await _buses.add({...bus.configMap(), 'active': false});
+    } else {
+      await _buses.doc(bus.id).update(bus.configMap());
+    }
+  }
+
+  @override
+  Future<void> deleteBus(String id) => _buses.doc(id).delete();
+
+  @override
+  Future<void> startTrip(String busId, double lat, double lng) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return _buses.doc(busId).update({
+      'active': true,
+      'lat': lat,
+      'lng': lng,
+      'updatedAt': now,
+      'tripStartedAt': now,
+    });
+  }
+
+  @override
+  Future<void> updateTripLocation(String busId, double lat, double lng) =>
+      _buses.doc(busId).update({
+        'lat': lat,
+        'lng': lng,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+  @override
+  Future<void> endTrip(String busId) =>
+      _buses.doc(busId).update({'active': false});
 }

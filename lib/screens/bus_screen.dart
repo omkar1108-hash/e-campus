@@ -1,147 +1,232 @@
 import 'dart:async';
 
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_user.dart';
-import '../models/bus_location.dart';
+import '../models/bus.dart';
 import '../services/backend.dart';
+import '../services/trip_controller.dart';
+import '../utils/bus_status.dart';
 import '../utils/rbac.dart';
+import '../widgets/bus_map.dart';
 
-/// Live college-bus position on Google Maps. Everyone can watch; the admin
-/// (bus driver account) can publish the phone's GPS position.
-class BusScreen extends StatefulWidget {
+List<BusMarker> _markers(List<Bus> buses, DateTime now) => [
+  for (final b in buses)
+    if (b.hasPosition)
+      BusMarker(
+        id: b.id,
+        label: b.name,
+        lat: b.lat!,
+        lng: b.lng!,
+        live: b.isLive(now),
+      ),
+];
+
+/// Drivers get trip controls; everyone else gets the tracking map.
+class BusScreen extends StatelessWidget {
   const BusScreen({super.key, required this.user});
 
   final AppUser user;
 
   @override
-  State<BusScreen> createState() => _BusScreenState();
+  Widget build(BuildContext context) => Rbac.canShareBusLocation(user)
+      ? _DriverView(user: user)
+      : _TrackView(user: user);
 }
 
-class _BusScreenState extends State<BusScreen> {
-  GoogleMapController? _map;
-  StreamSubscription<Position>? _gps;
-  bool get _sharing => _gps != null;
+/// Re-evaluates "live" every few seconds even if no new data arrives.
+mixin _Ticking<T extends StatefulWidget> on State<T> {
+  Timer? _tick;
+  DateTime now = DateTime.now();
 
   @override
-  void dispose() {
-    _gps?.cancel();
-    _map?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _toggleSharing() async {
-    if (_sharing) {
-      await _gps?.cancel();
-      setState(() => _gps = null);
-      return;
-    }
-    final backend = context.read<Backend>();
-    final messenger = ScaffoldMessenger.of(context);
-
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Turn on location services first')),
-      );
-      return;
-    }
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Location permission denied')),
-      );
-      return;
-    }
-    if (!mounted) return;
-    setState(() {
-      _gps =
-          Geolocator.getPositionStream(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 10,
-            ),
-          ).listen(
-            (p) => backend.updateBus(
-              BusLocation(
-                latitude: p.latitude,
-                longitude: p.longitude,
-                updatedAt: DateTime.now(),
-              ),
-            ),
-          );
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) setState(() => now = DateTime.now());
     });
   }
 
   @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+}
+
+class _TrackView extends StatefulWidget {
+  const _TrackView({required this.user});
+
+  final AppUser user;
+
+  @override
+  State<_TrackView> createState() => _TrackViewState();
+}
+
+class _TrackViewState extends State<_TrackView> with _Ticking {
+  String? _focusId;
+
+  @override
   Widget build(BuildContext context) {
     final backend = context.read<Backend>();
-    final canShare = Rbac.canShareBusLocation(widget.user);
-    return StreamBuilder<BusLocation?>(
-      stream: backend.watchBus(),
+    return StreamBuilder<List<Bus>>(
+      stream: backend.watchBuses(widget.user),
       builder: (context, snap) {
-        final bus = snap.data;
-        if (snap.hasError) return Center(child: Text('Error: ${snap.error}'));
-        if (bus == null) {
-          return const Center(child: Text('Bus location not available yet'));
+        if (snap.hasError) {
+          return Center(child: Text('Could not load buses: ${snap.error}'));
         }
-        final pos = LatLng(bus.latitude, bus.longitude);
-        _map?.animateCamera(CameraUpdate.newLatLng(pos));
-        return Stack(
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final buses = snap.data!;
+        final markers = _markers(buses, now);
+        return Column(
           children: [
-            GoogleMap(
-              initialCameraPosition: CameraPosition(target: pos, zoom: 15),
-              onMapCreated: (c) => _map = c,
-              markers: {
-                Marker(
-                  markerId: const MarkerId('bus'),
-                  position: pos,
-                  infoWindow: const InfoWindow(title: 'College Bus'),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueAzure,
-                  ),
-                ),
-              },
+            Expanded(
+              flex: 3,
+              child: BusMapView(markers: markers, focusId: _focusId),
             ),
-            Positioned(
-              left: 12,
-              right: 12,
-              top: 12,
-              child: Card(
-                child: ListTile(
-                  leading: const Icon(Icons.directions_bus),
-                  title: const Text('College Bus'),
-                  subtitle: Text(
-                    '${bus.latitude.toStringAsFixed(5)}, '
-                    '${bus.longitude.toStringAsFixed(5)}\n'
-                    'Updated ${DateFormat.jms().format(bus.updatedAt)}',
-                  ),
-                  isThreeLine: true,
+            Expanded(
+              flex: 2,
+              child: buses.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'No buses are assigned to your department yet.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: buses.length,
+                      itemBuilder: (context, i) {
+                        final b = buses[i];
+                        final live = b.isLive(now);
+                        return ListTile(
+                          selected: _focusId == b.id,
+                          leading: Icon(
+                            Icons.directions_bus,
+                            color: live ? Colors.green : null,
+                          ),
+                          title: Text(b.name),
+                          subtitle: Text('${b.plate}\n${busStatus(b, now)}'),
+                          isThreeLine: true,
+                          trailing: b.hasPosition
+                              ? const Icon(Icons.my_location)
+                              : null,
+                          onTap: b.hasPosition
+                              ? () => setState(() => _focusId = b.id)
+                              : null,
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DriverView extends StatefulWidget {
+  const _DriverView({required this.user});
+
+  final AppUser user;
+
+  @override
+  State<_DriverView> createState() => _DriverViewState();
+}
+
+class _DriverViewState extends State<_DriverView> with _Ticking {
+  @override
+  Widget build(BuildContext context) {
+    final backend = context.read<Backend>();
+    final trips = context.watch<TripController>();
+    return StreamBuilder<List<Bus>>(
+      stream: backend.watchBuses(widget.user),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Center(child: Text('Could not load your bus: ${snap.error}'));
+        }
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final bus = snap.data!.firstOrNull;
+        if (bus == null) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No bus has been assigned to you yet.\n'
+                'Ask the administration to assign one.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        final sharing = trips.isTracking(bus.id);
+        return Column(
+          children: [
+            Card(
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      bus.name,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text('${bus.plate} · ${bus.departments.join(', ')}'),
+                    const SizedBox(height: 8),
+                    Text(
+                      sharing
+                          ? 'Trip in progress - sharing your location'
+                          : bus.active
+                          ? 'Trip is marked active, but this phone is not '
+                                'sharing its location.'
+                          : 'No trip running',
+                    ),
+                    if (trips.error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          trips.error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    if (!sharing)
+                      FilledButton.icon(
+                        onPressed: trips.busy
+                            ? null
+                            : () => trips.start(bus.id),
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(bus.active ? 'Resume trip' : 'Start trip'),
+                      ),
+                    if (sharing || bus.active) ...[
+                      if (!sharing) const SizedBox(height: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                        onPressed: trips.busy ? null : () => trips.end(bus.id),
+                        icon: const Icon(Icons.stop),
+                        label: const Text('End trip'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
-            if (canShare)
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 12,
-                child: FilledButton.icon(
-                  onPressed: _toggleSharing,
-                  icon: Icon(_sharing ? Icons.stop : Icons.share_location),
-                  label: Text(
-                    _sharing
-                        ? 'Stop sharing location'
-                        : 'Share my location as bus',
-                  ),
-                ),
-              ),
+            Expanded(
+              child: BusMapView(markers: _markers([bus], now), focusId: bus.id),
+            ),
           ],
         );
       },

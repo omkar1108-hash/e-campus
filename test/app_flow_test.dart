@@ -1,17 +1,22 @@
 import 'package:e_campus/app.dart';
 import 'package:e_campus/models/app_user.dart';
 import 'package:e_campus/services/demo_backend.dart';
+import 'package:e_campus/widgets/bus_map.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fakes.dart';
 
 Future<DemoBackend> _start(WidgetTester tester) async {
   // A tall window so lazily built lists and long forms are fully visible.
   tester.view.physicalSize = const Size(800, 1800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final backend = DemoBackend(simulateBus: false);
+  final backend = DemoBackend();
   addTearDown(backend.dispose);
-  await tester.pumpWidget(ECampusApp(backend: backend));
+  await tester.pumpWidget(
+    ECampusApp(backend: backend, locationSource: FakeLocation()),
+  );
   await tester.pumpAndSettle();
   return backend;
 }
@@ -38,6 +43,9 @@ Future<void> _openMenuItem(WidgetTester tester, String title) async {
 }
 
 void main() {
+  setUpAll(() => BusMapView.debugListPlaceholder = true);
+  tearDownAll(() => BusMapView.debugListPlaceholder = false);
+
   testWidgets('login validates the email and has no self sign-up', (t) async {
     await _start(t);
     expect(find.text('Create an account'), findsNothing);
@@ -148,5 +156,114 @@ void main() {
     await t.tap(find.widgetWithText(SwitchListTile, 'Sneha Student'));
     await t.pumpAndSettle();
     expect(find.text('Girls: 1/2   ·   Boys: 2/2'), findsOneWidget);
+  });
+
+  testWidgets('students track only the buses of their department', (t) async {
+    await _start(t);
+    await _login(t, 'student@ecampus.demo'); // MCA
+    await _openMenuItem(t, 'Bus Tracking');
+    expect(find.text('Bus 1 - North route'), findsOneWidget);
+    expect(find.text('Bus 2 - South route'), findsNothing);
+    expect(find.textContaining('Not running'), findsOneWidget);
+  });
+
+  testWidgets('driver starts a trip, students see it live, driver ends it', (
+    t,
+  ) async {
+    final backend = await _start(t);
+    await _login(t, 'driver@ecampus.demo');
+    await _openMenuItem(t, 'Bus Tracking');
+    expect(find.text('Bus 1 - North route'), findsOneWidget);
+    expect(find.text('End trip'), findsNothing);
+
+    await t.tap(find.text('Start trip'));
+    await t.pumpAndSettle(const Duration(seconds: 1));
+    expect(find.textContaining('Trip in progress'), findsOneWidget);
+    expect(find.text('End trip'), findsOneWidget);
+    expect(find.text('Start trip'), findsNothing);
+    final seen = await backend
+        .watchBuses(
+          const AppUser(
+            uid: 'x',
+            email: 'x@y.z',
+            name: 'x',
+            department: 'MCA',
+            role: UserRole.student,
+          ),
+        )
+        .first;
+    expect(seen.single.isLive(DateTime.now()), isTrue);
+
+    await t.tap(find.text('End trip'));
+    await t.pumpAndSettle(const Duration(seconds: 1));
+    expect(find.text('No trip running'), findsOneWidget);
+    expect(find.text('Start trip'), findsOneWidget);
+  });
+
+  testWidgets('a driver without a bus is told so', (t) async {
+    final backend = await _start(t);
+    await backend.saveBus(
+      (await backend
+              .watchBuses(
+                const AppUser(
+                  uid: 'a',
+                  email: 'a@y.z',
+                  name: 'a',
+                  department: 'MCA',
+                  role: UserRole.admin,
+                ),
+              )
+              .first)
+          .firstWhere((b) => b.id == 'bus1')
+          .copyWith(clearDriver: true),
+    );
+    await _login(t, 'driver@ecampus.demo');
+    await _openMenuItem(t, 'Bus Tracking');
+    expect(find.textContaining('No bus has been assigned'), findsOneWidget);
+    expect(find.text('Start trip'), findsNothing);
+  });
+
+  testWidgets('drivers cannot open management screens', (t) async {
+    await _start(t);
+    await _login(t, 'driver@ecampus.demo');
+    await _openDrawer(t);
+    expect(find.text('Manage Buses'), findsNothing);
+    expect(find.text('Manage Users'), findsNothing);
+  });
+
+  testWidgets('admin staff adds a bus with a driver and departments', (
+    t,
+  ) async {
+    final backend = await _start(t);
+    await _login(t, 'staff@ecampus.demo');
+    await _openMenuItem(t, 'Manage Buses');
+    expect(find.textContaining('Bus 1 - North route'), findsOneWidget);
+    await t.tap(find.text('Add bus'));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextFormField).at(0), 'Bus 9 - West');
+    await t.enterText(find.byType(TextFormField).at(1), 'ab 12 cd 3456');
+    // No departments yet: saving must be refused.
+    await t.tap(find.text('Save'));
+    await t.pumpAndSettle();
+    expect(find.text('Choose at least one department'), findsOneWidget);
+    await t.tap(find.widgetWithText(FilterChip, 'Electronics'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Save'));
+    await t.pumpAndSettle();
+    final all = await backend
+        .watchBuses(
+          const AppUser(
+            uid: 'a',
+            email: 'a@y.z',
+            name: 'a',
+            department: 'MCA',
+            role: UserRole.admin,
+          ),
+        )
+        .first;
+    final bus = all.firstWhere((b) => b.name == 'Bus 9 - West');
+    expect(bus.plate, 'AB 12 CD 3456');
+    expect(bus.departments, ['Electronics']);
+    expect(find.textContaining('Bus 9 - West'), findsOneWidget);
   });
 }

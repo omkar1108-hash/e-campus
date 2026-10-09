@@ -2,7 +2,7 @@ import 'dart:async';
 
 import '../models/app_user.dart';
 import '../models/book.dart';
-import '../models/bus_location.dart';
+import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
 import 'backend.dart';
@@ -13,9 +13,8 @@ import 'backend.dart';
 ///   admin@ / staff@ / library@ / teacher@ / rep@ / student@ / driver@
 ///   ecampus.demo. Accounts created in the app are active immediately.
 class DemoBackend implements Backend {
-  DemoBackend({bool simulateBus = true}) {
+  DemoBackend() {
     _seed();
-    if (simulateBus) _startBusSimulation();
   }
 
   static const demoPassword = 'demo1234';
@@ -26,13 +25,13 @@ class DemoBackend implements Backend {
   final List<Book> _books = [];
   final List<NewsItem> _news = [];
   final Map<String, List<ChatMessage>> _chats = {};
-  BusLocation? _bus;
+  final Map<String, Bus> _buses = {};
 
   final _usersCtl = StreamController<void>.broadcast();
   final _booksCtl = StreamController<void>.broadcast();
   final _newsCtl = StreamController<void>.broadcast();
   final _chatCtl = StreamController<String>.broadcast();
-  final _busCtl = StreamController<BusLocation?>.broadcast();
+  final _busCtl = StreamController<void>.broadcast();
 
   String? _signedInUid;
   int _idCounter = 0;
@@ -152,40 +151,22 @@ class DemoBackend implements Backend {
       ),
     ]);
 
-    _bus = BusLocation(
-      latitude: _route.first.$1,
-      longitude: _route.first.$2,
-      updatedAt: DateTime.now(),
+    _buses['bus1'] = const Bus(
+      id: 'bus1',
+      name: 'Bus 1 - North route',
+      plate: 'MH 04 AB 1234',
+      driverUid: 'u-driver',
+      departments: ['MCA', 'MBA'],
+    );
+    _buses['bus2'] = const Bus(
+      id: 'bus2',
+      name: 'Bus 2 - South route',
+      plate: 'MH 04 CD 5678',
+      departments: ['Civil', 'Mechanical'],
     );
   }
 
-  // A small loop of points near Visakhapatnam used to simulate the bus.
-  static const _route = <(double, double)>[
-    (17.7231, 83.3013),
-    (17.7260, 83.3055),
-    (17.7295, 83.3098),
-    (17.7330, 83.3140),
-    (17.7300, 83.3190),
-    (17.7260, 83.3150),
-    (17.7235, 83.3070),
-  ];
-  int _routeIndex = 0;
-  Timer? _busTimer;
-
-  void _startBusSimulation() {
-    _busTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      _routeIndex = (_routeIndex + 1) % _route.length;
-      final p = _route[_routeIndex];
-      _bus = BusLocation(
-        latitude: p.$1,
-        longitude: p.$2,
-        updatedAt: DateTime.now(),
-      );
-      _busCtl.add(_bus);
-    });
-  }
-
-  void dispose() => _busTimer?.cancel();
+  void dispose() {}
 
   // ---- Auth -------------------------------------------------------------
   @override
@@ -365,16 +346,113 @@ class DemoBackend implements Backend {
     _chatCtl.add(chatId);
   }
 
-  // ---- Bus --------------------------------------------------------------
-  @override
-  Stream<BusLocation?> watchBus() async* {
-    yield _bus;
-    yield* _busCtl.stream;
+  // ---- Buses ------------------------------------------------------------
+  List<Bus> _busesFor(AppUser viewer) {
+    bool visible(Bus b) {
+      switch (viewer.role) {
+        case UserRole.admin:
+        case UserRole.adminStaff:
+        case UserRole.teacher:
+        case UserRole.libraryStaff:
+          return true;
+        case UserRole.busDriver:
+          return b.driverUid == viewer.uid;
+        case UserRole.student:
+        case UserRole.classRep:
+          return b.departments.contains(viewer.department);
+      }
+    }
+
+    return _buses.values.where(visible).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   @override
-  Future<void> updateBus(BusLocation location) async {
-    _bus = location;
-    _busCtl.add(location);
+  Stream<List<Bus>> watchBuses(AppUser viewer) =>
+      _live(_busCtl.stream, () => _busesFor(viewer));
+
+  @override
+  Future<void> saveBus(Bus bus) async {
+    if (bus.id.isEmpty) {
+      final id = 'bus${_nextId()}';
+      _buses[id] = Bus(
+        id: id,
+        name: bus.name,
+        plate: bus.plate,
+        driverUid: bus.driverUid,
+        departments: bus.departments,
+      );
+    } else {
+      final old = _buses[bus.id];
+      if (old == null) return;
+      _buses[bus.id] = Bus(
+        id: bus.id,
+        name: bus.name,
+        plate: bus.plate,
+        driverUid: bus.driverUid,
+        departments: bus.departments,
+        active: old.active,
+        lat: old.lat,
+        lng: old.lng,
+        updatedAt: old.updatedAt,
+        tripStartedAt: old.tripStartedAt,
+      );
+    }
+    _busCtl.add(null);
+  }
+
+  @override
+  Future<void> deleteBus(String id) async {
+    _buses.remove(id);
+    _busCtl.add(null);
+  }
+
+  Bus _withTrip(
+    Bus b, {
+    required bool active,
+    double? lat,
+    double? lng,
+    DateTime? started,
+  }) => Bus(
+    id: b.id,
+    name: b.name,
+    plate: b.plate,
+    driverUid: b.driverUid,
+    departments: b.departments,
+    active: active,
+    lat: lat ?? b.lat,
+    lng: lng ?? b.lng,
+    updatedAt: lat == null ? b.updatedAt : DateTime.now(),
+    tripStartedAt: started ?? b.tripStartedAt,
+  );
+
+  @override
+  Future<void> startTrip(String busId, double lat, double lng) async {
+    final b = _buses[busId];
+    if (b == null) return;
+    _buses[busId] = _withTrip(
+      b,
+      active: true,
+      lat: lat,
+      lng: lng,
+      started: DateTime.now(),
+    );
+    _busCtl.add(null);
+  }
+
+  @override
+  Future<void> updateTripLocation(String busId, double lat, double lng) async {
+    final b = _buses[busId];
+    if (b == null) return;
+    _buses[busId] = _withTrip(b, active: b.active, lat: lat, lng: lng);
+    _busCtl.add(null);
+  }
+
+  @override
+  Future<void> endTrip(String busId) async {
+    final b = _buses[busId];
+    if (b == null) return;
+    _buses[busId] = _withTrip(b, active: false);
+    _busCtl.add(null);
   }
 }
