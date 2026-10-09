@@ -10,6 +10,7 @@ import '../services/trip_controller.dart';
 import '../utils/bus_status.dart';
 import '../utils/rbac.dart';
 import '../widgets/bus_map.dart';
+import '../widgets/bus_route_info.dart';
 
 List<BusMarker> _markers(List<Bus> buses, DateTime now) => [
   for (final b in buses)
@@ -85,7 +86,11 @@ class _TrackViewState extends State<_TrackView> with _Ticking {
           children: [
             Expanded(
               flex: 3,
-              child: BusMapView(markers: markers, focusId: _focusId),
+              child: RoutedBusMap(
+                buses: buses,
+                markers: markers,
+                focusId: _focusId,
+              ),
             ),
             Expanded(
               flex: 2,
@@ -100,9 +105,15 @@ class _TrackViewState extends State<_TrackView> with _Ticking {
                       ),
                     )
                   : ListView.builder(
-                      itemCount: buses.length,
+                      itemCount: buses.length + 1,
                       itemBuilder: (context, i) {
-                        final b = buses[i];
+                        if (i == 0) {
+                          final r = RoutedBusMap.routed(buses, _focusId);
+                          return r == null
+                              ? const SizedBox.shrink()
+                              : BusRouteInfo(bus: r, now: now);
+                        }
+                        final b = buses[i - 1];
                         final live = b.isLive(now);
                         return ListTile(
                           selected: _focusId == b.id,
@@ -111,7 +122,10 @@ class _TrackViewState extends State<_TrackView> with _Ticking {
                             color: live ? Colors.green : null,
                           ),
                           title: Text(b.name),
-                          subtitle: Text('${b.plate}\n${busStatus(b, now)}'),
+                          subtitle: Text(
+                            '${b.plate}\n${busStatus(b, now)}'
+                            '${b.hasRoute ? '\n${b.legLabel}' : ''}',
+                          ),
                           isThreeLine: true,
                           trailing: b.hasPosition
                               ? const Icon(Icons.my_location)
@@ -200,12 +214,18 @@ class _DriverViewState extends State<_DriverView> with _Ticking {
                           ),
                         ),
                       ),
+                    if (bus.hasRoute && bus.active)
+                      Text(
+                        'Now heading to ${bus.legTo!.name}',
+                        key: const ValueKey('heading-to'),
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                     const SizedBox(height: 12),
                     if (!sharing)
                       FilledButton.icon(
                         onPressed: trips.busy
                             ? null
-                            : () => trips.start(bus.id),
+                            : () => trips.start(bus.id, bus: bus),
                         icon: const Icon(Icons.play_arrow),
                         label: Text(bus.active ? 'Resume trip' : 'Start trip'),
                       ),
@@ -224,8 +244,13 @@ class _DriverViewState extends State<_DriverView> with _Ticking {
                 ),
               ),
             ),
+            BusRouteInfo(bus: bus, now: now),
             Expanded(
-              child: BusMapView(markers: _markers([bus], now), focusId: bus.id),
+              child: RoutedBusMap(
+                buses: [bus],
+                markers: _markers([bus], now),
+                focusId: bus.id,
+              ),
             ),
           ],
         );

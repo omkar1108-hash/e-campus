@@ -102,7 +102,6 @@ void main() {
       expect(roles.toSet(), {
         UserRole.grievanceCommittee,
         UserRole.libraryStaff,
-        UserRole.hod,
         UserRole.teacher,
         UserRole.student,
         UserRole.busDriver,

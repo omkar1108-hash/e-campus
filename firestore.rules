@@ -40,7 +40,7 @@ service cloud.firestore {
                          'hod', 'teacher', 'student', 'busDriver'])
                       ||
                       (isAdminStaff() && request.resource.data.role in
-                        ['grievanceCommittee', 'libraryStaff', 'hod', 'teacher',
+                        ['grievanceCommittee', 'libraryStaff', 'teacher',
                          'student', 'busDriver'])
                     );
 
@@ -57,9 +57,11 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['name', 'department', 'role', 'gender', 'active'])
           && (request.resource.data.role == resource.data.role
-              || request.resource.data.role in
-                   ['student', 'classRep', 'teacher', 'hod', 'grievanceCommittee',
-                    'libraryStaff', 'busDriver']))
+              // Only the administrator appoints or removes a head of department.
+              || (resource.data.role != 'hod'
+                  && request.resource.data.role in
+                       ['student', 'classRep', 'teacher', 'grievanceCommittee',
+                        'libraryStaff', 'busDriver'])))
         ||
         // Head of department: only toggle student <-> class rep inside their
         // own department. (The 2 girls + 2 boys limit is enforced by the app.)
@@ -231,10 +233,15 @@ service cloud.firestore {
     }
 
     // ---- Timetable -----------------------------------------------------
-    // One document per department, edited by admin staff / admin.
+    // One document per department. Its students and teachers read it; admin
+    // and admin staff read every one; only that department's head of
+    // department writes it (the admin appoints the head).
     match /timetables/{department} {
-      allow read: if notDriver();
-      allow create, update: if (isAdmin() || isAdminStaff())
+      allow read: if active()
+                  && (role() in ['admin', 'adminStaff']
+                      || (role() in ['student', 'classRep', 'teacher', 'hod']
+                          && profile().department == department));
+      allow create, update: if isHod() && profile().department == department
                     && request.resource.data.keys().hasOnly(['slots', 'updatedAt'])
                     && request.resource.data.slots is list
                     && request.resource.data.slots.size() <= 200;
@@ -523,6 +530,19 @@ service cloud.firestore {
                                   'grievanceCommittee'];
     }
 
+    // The route is a start and an end point (name + coordinates), both set or
+    // both null. The bus switches between 'outbound' and 'return' on arrival.
+    function coord(v, limit) {
+      return v == null || (v is number && v >= -limit && v <= limit);
+    }
+    function validRoute(d) {
+      return coord(d.get('startLat', null), 90) && coord(d.get('endLat', null), 90)
+          && coord(d.get('startLng', null), 180) && coord(d.get('endLng', null), 180)
+          && (d.get('startLat', null) == null) == (d.get('endLat', null) == null)
+          && (d.get('startLat', null) == null) == (d.get('startLng', null) == null)
+          && (d.get('endLat', null) == null) == (d.get('endLng', null) == null);
+    }
+
     match /buses/{id} {
       allow read: if canTrackAnyBus()
                   || (active() && role() in ['student', 'classRep']
@@ -532,7 +552,10 @@ service cloud.firestore {
 
       allow create: if (isAdmin() || isAdminStaff())
                     && request.resource.data.keys().hasOnly(
-                         ['name', 'plate', 'driverUid', 'departments', 'active'])
+                         ['name', 'plate', 'driverUid', 'departments', 'active',
+                          'startName', 'startLat', 'startLng',
+                          'endName', 'endLat', 'endLng'])
+                    && validRoute(request.resource.data)
                     && request.resource.data.active == false
                     && request.resource.data.name is string
                     && request.resource.data.departments is list;
@@ -541,12 +564,16 @@ service cloud.firestore {
         // Administration edits the configuration only.
         if ((isAdmin() || isAdminStaff())
              && request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['name', 'plate', 'driverUid', 'departments']))
+                  .hasOnly(['name', 'plate', 'driverUid', 'departments',
+                            'startName', 'startLat', 'startLng',
+                            'endName', 'endLat', 'endLng'])
+             && validRoute(request.resource.data))
         // The assigned driver controls the trip only.
         || (active() && role() == 'busDriver'
              && resource.data.driverUid == request.auth.uid
              && request.resource.data.diff(resource.data).affectedKeys()
-                  .hasOnly(['active', 'lat', 'lng', 'updatedAt', 'tripStartedAt']));
+                  .hasOnly(['active', 'lat', 'lng', 'updatedAt', 'tripStartedAt', 'leg'])
+             && request.resource.data.get('leg', 'outbound') in ['outbound', 'return']);
 
       allow delete: if isAdmin() || isAdminStaff();
     }

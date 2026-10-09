@@ -8,8 +8,9 @@ import '../services/backend.dart';
 import '../utils/rbac.dart';
 import '../widgets/common.dart';
 
-/// Weekly timetable per department. Admin staff / admin edit it; teachers
-/// can switch to "My classes" to see their own lectures across departments.
+/// Weekly timetable of a department. Its students and teachers see it, only
+/// its head of department edits it, and admin / admin staff can look at every
+/// department. Teachers can switch to "My classes".
 class TimetableScreen extends StatefulWidget {
   const TimetableScreen({super.key, required this.user});
 
@@ -24,12 +25,16 @@ class _TimetableScreenState extends State<TimetableScreen> {
   bool _mine = false;
 
   AppUser get _me => widget.user;
-  bool get _canEdit => Rbac.canEditTimetable(_me);
+  bool get _canEdit =>
+      Rbac.canEditTimetable(_me) && _department == _me.department;
+  bool get _seesAll => Rbac.isAdministration(_me);
 
   Future<void> _add(Map<String, List<TimetableSlot>> all) async {
     final backend = context.read<Backend>();
     final teachers = (await backend.watchUsers().first)
-        .where((u) => u.role.isTeaching && u.active)
+        .where(
+          (u) => u.role.isTeaching && u.active && u.department == _department,
+        )
         .toList();
     if (!mounted) return;
     final slot = await showDialog<TimetableSlot>(
@@ -52,7 +57,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   Widget build(BuildContext context) {
     final backend = context.read<Backend>();
     return Live<Map<String, List<TimetableSlot>>>(
-      stream: backend.watchTimetables(),
+      stream: backend.watchTimetables(_me),
       builder: (context, all) {
         final slots = _mine
             ? [
@@ -91,11 +96,14 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           onSelected: (_) => setState(() => _mine = true),
                         ),
                       ),
-                    for (final d in {
-                      ...AppConfig.departments,
-                      ...all.keys,
-                      _me.department,
-                    }.where((d) => d.isNotEmpty))
+                    // Only administration can look at other departments.
+                    for (final d
+                        in _seesAll
+                            ? {
+                                ...AppConfig.departments,
+                                ...all.keys,
+                              }.where((d) => d.isNotEmpty)
+                            : <String>[_me.department])
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(

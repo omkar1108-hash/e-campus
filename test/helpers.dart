@@ -1,5 +1,6 @@
 import 'package:e_campus/app.dart';
 import 'package:e_campus/services/demo_backend.dart';
+import 'package:e_campus/services/route_service.dart';
 import 'package:e_campus/widgets/bus_map.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +23,7 @@ Future<DemoBackend> startApp(
       backend: backend,
       locationSource: FakeLocation(),
       imagePicker: imagePicker ?? FakeImagePicker(),
+      routeService: const EstimateRouteService(),
     ),
   );
   await tester.pumpAndSettle();

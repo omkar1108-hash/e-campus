@@ -316,39 +316,85 @@ void main() {
   });
 
   group('timetable', () {
-    testWidgets('admin staff add a class and the students see it', (t) async {
+    testWidgets(
+      'only the head of department edits; department members see it',
+      (t) async {
+        await startApp(t);
+        await login(t, 'hod@ecampus.demo');
+        await openMenuItem(t, 'Timetable');
+        expect(find.text('Mobile Computing'), findsWidgets);
+        await t.tap(find.text('Add class'));
+        await t.pumpAndSettle();
+        await typeInto(t, 2, 'Operating Systems');
+        await tapButton(t, 'Add');
+        expect(find.text('Operating Systems'), findsOneWidget);
+
+        // A bad time is refused.
+        await t.tap(find.text('Add class'));
+        await t.pumpAndSettle();
+        await typeInto(t, 0, '9am');
+        await typeInto(t, 2, 'Bad');
+        await tapButton(t, 'Add');
+        expect(find.text('Use 24-hour HH:mm'), findsOneWidget);
+        await t.tap(find.text('Cancel'));
+        await t.pumpAndSettle();
+
+        // Students and teachers of the department see it but cannot edit.
+        for (final who in ['student', 'rep', 'teacher']) {
+          await signOut(t);
+          await login(t, '$who@ecampus.demo');
+          await openMenuItem(t, 'Timetable');
+          expect(find.text('Operating Systems'), findsOneWidget, reason: who);
+          expect(find.text('Add class'), findsNothing, reason: who);
+          expect(find.byTooltip('Remove class'), findsNothing, reason: who);
+        }
+
+        // Another department does not see MCA's timetable.
+        await signOut(t);
+        await login(t, 'meena@ecampus.demo');
+        await openMenuItem(t, 'Timetable');
+        expect(find.text('Operating Systems'), findsNothing);
+        expect(find.textContaining('No timetable for MBA'), findsOneWidget);
+      },
+    );
+
+    testWidgets('admin and admin staff can look but not edit', (t) async {
       await startApp(t);
-      await login(t, 'staff@ecampus.demo');
-      await openMenuItem(t, 'Timetable');
-      expect(find.text('Mobile Computing'), findsWidgets);
-      await t.tap(find.text('Add class'));
-      await t.pumpAndSettle();
-      await typeInto(t, 2, 'Operating Systems');
-      await tapButton(t, 'Add');
-      expect(find.text('Operating Systems'), findsOneWidget);
-
-      // A bad time is refused.
-      await t.tap(find.text('Add class'));
-      await t.pumpAndSettle();
-      await typeInto(t, 0, '9am');
-      await typeInto(t, 2, 'Bad');
-      await tapButton(t, 'Add');
-      expect(find.text('Use 24-hour HH:mm'), findsOneWidget);
-      await t.tap(find.text('Cancel'));
-      await t.pumpAndSettle();
-
-      await signOut(t);
-      await login(t, 'student@ecampus.demo');
-      await openMenuItem(t, 'Timetable');
-      expect(find.text('Operating Systems'), findsOneWidget);
-      // Students cannot edit.
-      expect(find.text('Add class'), findsNothing);
-      expect(find.byTooltip('Remove class'), findsNothing);
+      for (final who in ['admin', 'staff']) {
+        await login(t, '$who@ecampus.demo');
+        await openMenuItem(t, 'Timetable');
+        expect(find.text('Mobile Computing'), findsWidgets, reason: who);
+        expect(find.text('Add class'), findsNothing, reason: who);
+        expect(find.byTooltip('Remove class'), findsNothing, reason: who);
+        // They can open other departments too.
+        await t.tap(find.widgetWithText(ChoiceChip, 'MBA'));
+        await t.pumpAndSettle();
+        expect(find.textContaining('No timetable for MBA'), findsOneWidget);
+        await signOut(t);
+      }
     });
 
-    testWidgets('a teacher sees their own classes across departments', (
+    testWidgets('library staff, the committee and drivers have no timetable', (
       t,
     ) async {
+      await startApp(t);
+      for (final who in ['library', 'committee', 'driver']) {
+        await login(t, '$who@ecampus.demo');
+        await openDrawer(t);
+        expect(
+          find.descendant(
+            of: find.byType(Drawer),
+            matching: find.text('Timetable'),
+          ),
+          findsNothing,
+          reason: who,
+        );
+        await t.tap(find.text('Sign out'));
+        await t.pumpAndSettle();
+      }
+    });
+
+    testWidgets('a teacher can narrow to their own classes', (t) async {
       await startApp(t);
       await login(t, 'teacher@ecampus.demo');
       await openMenuItem(t, 'Timetable');
@@ -358,9 +404,9 @@ void main() {
       expect(find.text('Add class'), findsNothing);
     });
 
-    testWidgets('removing a class works', (t) async {
+    testWidgets('the head of department removes a class', (t) async {
       await startApp(t);
-      await login(t, 'staff@ecampus.demo');
+      await login(t, 'hod@ecampus.demo');
       await openMenuItem(t, 'Timetable');
       final before = find.byTooltip('Remove class').evaluate().length;
       await t.tap(find.byTooltip('Remove class').first);
@@ -585,19 +631,14 @@ void main() {
     await startApp(t);
     await login(t, 'committee@ecampus.demo');
     await openDrawer(t);
-    for (final item in [
-      'Complaints',
-      'Notices',
-      'Timetable',
-      'Chat',
-      'Bus Tracking',
-    ]) {
+    for (final item in ['Complaints', 'Notices', 'Chat', 'Bus Tracking']) {
       expect(
         find.descendant(of: find.byType(Drawer), matching: find.text(item)),
         findsOneWidget,
       );
     }
     for (final item in [
+      'Timetable',
       'Manage Users',
       'Attendance',
       'Activity Log',

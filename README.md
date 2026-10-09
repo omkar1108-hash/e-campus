@@ -14,14 +14,15 @@ class representatives, teachers and administrators.
 | Class representatives | Only the **head of department** picks them for their own department: at most 2 girls and 2 boys (4 per department) |
 | E-Library | Search, read/download books (link-based) with **cover pictures** (picked from the gallery, or fetched from the ISBN via Open Library). Teachers' books go to a **verification queue**: library staff approve, or reject with a reason; the teacher sees the reason, fixes the book and resubmits. Library staff, admin staff and admin add books without approval |
 | Bus tracking | Several buses, each with a driver and the departments allowed to track it. Drivers **start / end a trip** and share their phone's GPS. Google Maps on Android / iOS, OpenStreetMap map on Windows, macOS, Linux and web |
-| Manage buses | Admin / admin staff add buses, assign a driver and choose the departments that can track each bus |
+| Manage buses | Admin / admin staff add buses, assign a driver, choose the departments that can track each bus and set the **route**: a start and an end point (name + coordinates, picked on a map or typed) |
+| Bus routes | Students, staff and the driver see the route on the map, its distance and travel time (road routing from OpenStreetMap data via the free OSRM server; a straight-line estimate is shown if it cannot be reached) and, while the bus runs, the time left to the next stop. When the driver's phone reaches the end point the bus **turns back automatically** to the start, and again at the start |
 | Chat | One-to-one, real time. **Edit** (15 min), **delete for everyone**, **pin** messages; **unread dots** and a drawer badge; a **banner** when a message arrives while the app is open (no push notifications while it is closed - that needs a paid Firebase plan); **department filter** on the people list; links in messages are clickable |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
 | Tech news | Class reps / teachers / admin staff / admin post, optionally with a **poster picture** from the gallery; everyone but drivers reads their own department's news |
 | Opening page | The screen before sign-in: college name and contacts (`lib/config/app_config.dart`), the sign-in form, what the app offers and any **public notices**. Two columns on desktop |
 | Dashboard | Live cards per role: unread messages, notices, today's classes, assignments due, attendance %, books to verify, bus status, account counts, new complaints, activity... Each card opens its section |
 | Notices | Announcements by admin / admin staff, optionally with a poster. Choose the **audience**: which branches (or all) and which groups (students, teachers, other staff, bus drivers, or everyone). Notices for everybody can also be **public** (shown on the opening page). Students and class reps cannot post |
-| Timetable | One weekly timetable per department, edited by admin staff / admin. Teachers also get **My classes** across departments |
+| Timetable | One weekly timetable per department, **edited only by that department's head of department** (appointed by the administrator) and visible to the department's students and teachers (admin and admin staff can look at every department, read only). Teachers also get **My classes** |
 | Attendance | Teachers mark a lecture (department, subject, date) and can correct it later; students see their percentage per subject and overall, with a warning under 75% |
 | Assignments & notes | Teachers share assignments (with due date) and notes as **links** (Drive, OneDrive...); students see their department's items |
 | Complaints | Anyone except the committee files a complaint (category, subject, details), **optionally anonymous**. Only the filer, the **Grievance Committee**, admin staff and admin can see it. The committee moves it *Sent -> Working on it -> Resolved*; the **person who filed it then confirms** (*Closed*) or sends it back (*Working on it* again). The committee may also reject it. The **administrator** (only) can see who filed an anonymous complaint |
@@ -47,11 +48,12 @@ class representatives, teachers and administrators.
 | Choose class reps (own dept) | | | | | | | |
 | (head of department only) | | | `hod` | | | | |
 | Create / edit / disable accounts | | | | | | all but admins | all but self |
-| Create accounts of role | | | | | | committee, library, teacher, student, driver | any except class rep |
+| Create accounts of role | | | | | | committee, library, teacher, student, driver (not HOD) | any except class rep |
 | Notices: read (those aimed at you) | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | Notices: post / delete | | | | | | ✔ | ✔ |
-| Timetable: view | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
-| Timetable: edit | | | | | | ✔ | ✔ |
+| Timetable: view (own department) | ✔ | ✔ | ✔ | | | ✔ (all) | ✔ (all) |
+| Timetable: edit (own department) | | | `hod` | | | | |
+| Appoint / remove a head of department | | | | | | | ✔ |
 | Mark attendance / post assignments (admin and staff do not see assignments) | | | ✔ | | | | |
 | See own attendance | ✔ | ✔ | | | | | |
 | File a complaint | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -155,3 +157,7 @@ staff or admin).
 - **Emergency alerts** and chat banners appear only while the app is open;
   there are no push notifications on the free plan.
 - The college address, phone and email on the opening page are placeholders.
+- **Bus route times** come from the free public OSRM server, which has no
+  guarantee of availability; without it the app shows a straight-line
+  estimate (30 km/h, +30% detour) and says so. The automatic turn-back runs on
+  the driver's phone, so it only works while the driver's app is open.

@@ -27,7 +27,7 @@ class DashboardScreen extends StatelessWidget {
     final theme = Theme.of(context);
 
     Stream<List<TimetableSlot>> todaysClasses() =>
-        backend.watchTimetables().map((all) {
+        backend.watchTimetables(u).map((all) {
           final day = weekDayName(DateTime.now());
           final mine = Rbac.isStudent(u)
               ? all[u.department] ?? const <TimetableSlot>[]

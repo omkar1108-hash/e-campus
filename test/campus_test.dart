@@ -36,14 +36,43 @@ Future<DemoBackend> _signedIn(String email) async {
 
 void main() {
   group('permissions for the campus features', () {
-    test('notices and timetable: admin side edits, drivers see nothing', () {
-      final admins = {UserRole.admin, UserRole.adminStaff};
-      expect(_who(Rbac.canPostNotices), admins);
-      expect(_who(Rbac.canEditTimetable), admins);
-      final noDrivers = UserRole.values.toSet()..remove(UserRole.busDriver);
+    test('notices are posted by administration and read by everybody', () {
+      expect(_who(Rbac.canPostNotices), {UserRole.admin, UserRole.adminStaff});
       expect(_who(Rbac.canReadNotices), UserRole.values.toSet());
-      expect(_who(Rbac.canViewTimetable), noDrivers);
+      final noDrivers = UserRole.values.toSet()..remove(UserRole.busDriver);
       expect(_who(Rbac.canSearch), noDrivers);
+    });
+
+    test('timetable: only the head of department edits', () {
+      expect(_who(Rbac.canEditTimetable), {UserRole.hod});
+      expect(_who(Rbac.canViewTimetable), {
+        UserRole.student,
+        UserRole.classRep,
+        UserRole.teacher,
+        UserRole.hod,
+        UserRole.adminStaff,
+        UserRole.admin,
+      });
+    });
+
+    test('only the administrator appoints heads of department', () {
+      expect(Rbac.rolesCreatableBy(_u(UserRole.admin)), contains(UserRole.hod));
+      expect(
+        Rbac.rolesCreatableBy(_u(UserRole.adminStaff)),
+        isNot(contains(UserRole.hod)),
+      );
+      final teacher = _u(UserRole.teacher);
+      final hod = _u(UserRole.hod);
+      final staff = _u(UserRole.adminStaff);
+      final admin = _u(UserRole.admin);
+      expect(Rbac.rolesAssignableBy(admin, teacher), contains(UserRole.hod));
+      expect(
+        Rbac.rolesAssignableBy(staff, teacher),
+        isNot(contains(UserRole.hod)),
+      );
+      // ...and cannot demote one either.
+      expect(Rbac.rolesAssignableBy(staff, hod), [UserRole.hod]);
+      expect(Rbac.rolesAssignableBy(admin, hod), contains(UserRole.teacher));
     });
 
     test('attendance and assignments belong to teachers', () {
