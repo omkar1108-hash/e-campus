@@ -99,6 +99,7 @@ void main() {
     test('admin staff cannot create admins or admin staff', () {
       final roles = Rbac.rolesCreatableBy(_u(UserRole.adminStaff));
       expect(roles.toSet(), {
+        UserRole.grievanceCommittee,
         UserRole.libraryStaff,
         UserRole.teacher,
         UserRole.student,

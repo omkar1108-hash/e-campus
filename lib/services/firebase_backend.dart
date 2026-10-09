@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/app_user.dart';
 import '../models/book.dart';
+import '../models/campus.dart';
 import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
@@ -24,6 +25,9 @@ class FirebaseBackend implements Backend {
 
   @override
   bool get isDemo => false;
+
+  /// Profile of the signed-in user; named in activity-log entries.
+  AppUser? _actor;
 
   CollectionReference<Map<String, dynamic>> get _users =>
       _db.collection('users');
@@ -62,6 +66,7 @@ class FirebaseBackend implements Backend {
           'Your account has been disabled. Please contact an administrator.',
         );
       }
+      _actor = profile;
       return profile;
     } on FirebaseAuthException catch (e) {
       throw AuthException(_authMessage(e));
@@ -86,6 +91,7 @@ class FirebaseBackend implements Backend {
       await _auth.signOut();
       return null;
     }
+    _actor = profile;
     return profile;
   }
 
@@ -95,7 +101,54 @@ class FirebaseBackend implements Backend {
   }
 
   @override
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() {
+    _actor = null;
+    return _auth.signOut();
+  }
+
+  // ---- Activity log -----------------------------------------------------
+  /// Best effort: a failed log write never blocks the action itself.
+  Future<void> _log(
+    String action,
+    String targetType,
+    String targetLabel, {
+    String details = '',
+  }) async {
+    final me = _actor;
+    if (me == null) return;
+    try {
+      await _db
+          .collection('activityLog')
+          .add(
+            ActivityEntry(
+              id: '',
+              action: action,
+              actorUid: me.uid,
+              actorName: me.name,
+              actorRole: me.role.name,
+              targetType: targetType,
+              targetLabel: _clip(targetLabel, 200),
+              details: _clip(details, 200),
+              createdAt: DateTime.now(),
+            ).toMap(),
+          );
+    } catch (_) {}
+  }
+
+  static String _clip(String s, int n) => s.length <= n ? s : s.substring(0, n);
+
+  /// Reads one text field of a document (for naming it in the log).
+  Future<String> _field(
+    CollectionReference<Map<String, dynamic>> c,
+    String id,
+    String field,
+  ) async {
+    try {
+      return ((await c.doc(id).get()).data()?[field] ?? id) as String;
+    } catch (_) {
+      return id;
+    }
+  }
 
   // ---- Accounts ---------------------------------------------------------
   /// A second Firebase app instance is used to create the login, because
@@ -159,6 +212,12 @@ class FirebaseBackend implements Backend {
         created = null;
         rethrow;
       }
+      await _log(
+        'account.created',
+        'account',
+        name,
+        details: '${role.label}, $department',
+      );
       try {
         await created.sendEmailVerification();
         await creator.sendPasswordResetEmail(email: address);
@@ -206,16 +265,31 @@ class FirebaseBackend implements Backend {
   );
 
   @override
-  Future<void> updateUser(AppUser user) => _users.doc(user.uid).update({
-    'name': user.name,
-    'department': user.department,
-    'role': user.role.name,
-    if (user.gender != null) 'gender': user.gender!.name,
-  });
+  Future<void> updateUser(AppUser user) async {
+    await _users.doc(user.uid).update({
+      'name': user.name,
+      'department': user.department,
+      'role': user.role.name,
+      if (user.gender != null) 'gender': user.gender!.name,
+    });
+    await _log(
+      'account.updated',
+      'account',
+      user.name,
+      details: '${user.role.label}, ${user.department}',
+    );
+  }
 
   @override
-  Future<void> setUserActive(String uid, bool active) =>
-      _users.doc(uid).update({'active': active});
+  Future<void> setUserActive(String uid, bool active) async {
+    final name = await _field(_users, uid, 'name');
+    await _users.doc(uid).update({'active': active});
+    await _log(
+      active ? 'account.enabled' : 'account.disabled',
+      'account',
+      name,
+    );
+  }
 
   @override
   Future<void> setUserRole(String uid, UserRole role) =>
@@ -275,13 +349,26 @@ class FirebaseBackend implements Backend {
     String id, {
     required bool approve,
     String reason = '',
-  }) => _books.doc(id).update({
-    'status': (approve ? BookStatus.approved : BookStatus.rejected).name,
-    'rejectReason': approve ? '' : reason,
-  });
+  }) async {
+    final title = await _field(_books, id, 'title');
+    await _books.doc(id).update({
+      'status': (approve ? BookStatus.approved : BookStatus.rejected).name,
+      'rejectReason': approve ? '' : reason,
+    });
+    await _log(
+      approve ? 'book.approved' : 'book.rejected',
+      'book',
+      title,
+      details: approve ? '' : reason,
+    );
+  }
 
   @override
-  Future<void> deleteBook(String id) => _books.doc(id).delete();
+  Future<void> deleteBook(String id) async {
+    final title = await _field(_books, id, 'title');
+    await _books.doc(id).delete();
+    await _log('book.deleted', 'book', title);
+  }
 
   @override
   Future<int> approveLegacyBooks() async {
@@ -317,7 +404,11 @@ class FirebaseBackend implements Backend {
       _db.collection('news').add(item.toMap());
 
   @override
-  Future<void> deleteNews(String id) => _db.collection('news').doc(id).delete();
+  Future<void> deleteNews(String id) async {
+    final title = await _field(_db.collection('news'), id, 'title');
+    await _db.collection('news').doc(id).delete();
+    await _log('news.deleted', 'news', title);
+  }
 
   // ---- Chat -------------------------------------------------------------
   DocumentReference<Map<String, dynamic>> _chat(String chatId) =>
@@ -439,6 +530,7 @@ class FirebaseBackend implements Backend {
       case UserRole.adminStaff:
       case UserRole.teacher:
       case UserRole.libraryStaff:
+      case UserRole.grievanceCommittee:
         query = _buses;
       case UserRole.busDriver:
         query = _buses.where('driverUid', isEqualTo: viewer.uid);
@@ -463,7 +555,11 @@ class FirebaseBackend implements Backend {
   }
 
   @override
-  Future<void> deleteBus(String id) => _buses.doc(id).delete();
+  Future<void> deleteBus(String id) async {
+    final name = await _field(_buses, id, 'name');
+    await _buses.doc(id).delete();
+    await _log('bus.deleted', 'bus', name);
+  }
 
   @override
   Future<void> startTrip(String busId, double lat, double lng) {
@@ -488,4 +584,312 @@ class FirebaseBackend implements Backend {
   @override
   Future<void> endTrip(String busId) =>
       _buses.doc(busId).update({'active': false});
+
+  // ---- Notices ----------------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _notices =>
+      _db.collection('notices');
+
+  List<Notice> _noticeList(QuerySnapshot<Map<String, dynamic>> s) =>
+      s.docs.map((d) => Notice.fromMap(d.id, d.data())).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  @override
+  Stream<List<Notice>> watchNotices() => _notices.snapshots().map(_noticeList);
+
+  @override
+  Stream<List<Notice>> watchPublicNotices() =>
+      _notices.where('public', isEqualTo: true).snapshots().map(_noticeList);
+
+  @override
+  Future<void> addNotice(Notice notice) => _notices.add(notice.toMap());
+
+  @override
+  Future<void> deleteNotice(String id) async {
+    final title = await _field(_notices, id, 'title');
+    await _notices.doc(id).delete();
+    await _log('notice.deleted', 'notice', title);
+  }
+
+  // ---- Emergency alerts ---------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _alerts =>
+      _db.collection('alerts');
+
+  @override
+  Stream<List<EmergencyAlert>> watchActiveAlerts() => _alerts
+      .where('active', isEqualTo: true)
+      .snapshots()
+      .map(
+        (s) =>
+            s.docs.map((d) => EmergencyAlert.fromMap(d.id, d.data())).toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+      );
+
+  @override
+  Future<void> sendAlert(String message) async {
+    final me = _actor!;
+    await _alerts.add(
+      EmergencyAlert(
+        id: '',
+        message: message,
+        authorName: me.name,
+        createdAt: DateTime.now(),
+      ).toMap(),
+    );
+    await _log('alert.sent', 'alert', message);
+  }
+
+  @override
+  Future<void> clearAlert(String id) async {
+    final message = await _field(_alerts, id, 'message');
+    await _alerts.doc(id).update({
+      'active': false,
+      'clearedAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    await _log('alert.cleared', 'alert', message);
+  }
+
+  // ---- Timetable --------------------------------------------------------
+  @override
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables() => _db
+      .collection('timetables')
+      .snapshots()
+      .map(
+        (s) => {
+          for (final d in s.docs)
+            d.id: [
+              for (final m in (d.data()['slots'] ?? const []) as List)
+                TimetableSlot.fromMap(Map<String, dynamic>.from(m as Map)),
+            ]..sort((a, b) => a.order.compareTo(b.order)),
+        },
+      );
+
+  @override
+  Future<void> saveTimetable(String department, List<TimetableSlot> slots) =>
+      _db.collection('timetables').doc(department).set({
+        'slots': [for (final x in slots) x.toMap()],
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+
+  // ---- Assignments & notes ------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _assignments =>
+      _db.collection('assignments');
+
+  @override
+  Stream<List<Assignment>> watchAssignments(AppUser viewer) {
+    final Query<Map<String, dynamic>>? q;
+    if (viewer.role == UserRole.admin || viewer.role == UserRole.adminStaff) {
+      q = _assignments;
+    } else if (viewer.role == UserRole.teacher) {
+      q = _assignments.where('createdBy', isEqualTo: viewer.uid);
+    } else if (Rbac.isStudent(viewer)) {
+      q = _assignments.where('department', isEqualTo: viewer.department);
+    } else {
+      q = null;
+    }
+    if (q == null) return Stream.value(const []);
+    return q.snapshots().map(
+      (s) =>
+          s.docs.map((d) => Assignment.fromMap(d.id, d.data())).toList()
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+    );
+  }
+
+  @override
+  Future<void> addAssignment(Assignment item) => _assignments.add(item.toMap());
+
+  @override
+  Future<void> deleteAssignment(String id) => _assignments.doc(id).delete();
+
+  // ---- Attendance -------------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _attendance =>
+      _db.collection('attendanceRecords');
+
+  @override
+  Future<void> saveAttendance(List<AttendanceRecord> records) async {
+    for (var i = 0; i < records.length; i += 400) {
+      final batch = _db.batch();
+      for (final r in records.skip(i).take(400)) {
+        batch.set(_attendance.doc(r.docId), r.toMap());
+      }
+      await batch.commit();
+    }
+  }
+
+  List<AttendanceRecord> _records(QuerySnapshot<Map<String, dynamic>> s) =>
+      s.docs.map((d) => AttendanceRecord.fromMap(d.data())).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  @override
+  Stream<List<AttendanceRecord>> watchMyAttendance(String studentUid) =>
+      _attendance
+          .where('studentUid', isEqualTo: studentUid)
+          .snapshots()
+          .map(_records);
+
+  @override
+  Stream<List<AttendanceRecord>> watchMarkedAttendance(String teacherUid) =>
+      _attendance
+          .where('teacherUid', isEqualTo: teacherUid)
+          .snapshots()
+          .map(_records);
+
+  // ---- Complaints -------------------------------------------------------
+  CollectionReference<Map<String, dynamic>> get _complaints =>
+      _db.collection('complaints');
+  CollectionReference<Map<String, dynamic>> get _identities =>
+      _db.collection('complaintIdentities');
+
+  @override
+  Stream<List<ComplaintIdentity>> watchMyComplaints(String uid) => _identities
+      .where('filedBy', isEqualTo: uid)
+      .snapshots()
+      .map(
+        (s) =>
+            s.docs
+                .map((d) => ComplaintIdentity.fromMap(d.id, d.data()))
+                .toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+      );
+
+  @override
+  Stream<List<Complaint>> watchAllComplaints() => _complaints.snapshots().map(
+    (s) =>
+        s.docs.map((d) => Complaint.fromMap(d.id, d.data())).toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
+  );
+
+  @override
+  Stream<Complaint?> watchComplaint(String id) => _complaints
+      .doc(id)
+      .snapshots()
+      .map((d) => d.exists ? Complaint.fromMap(d.id, d.data()!) : null);
+
+  @override
+  Future<ComplaintIdentity?> getComplaintIdentity(String id) async {
+    final d = await _identities.doc(id).get();
+    return d.exists ? ComplaintIdentity.fromMap(d.id, d.data()!) : null;
+  }
+
+  @override
+  Future<String> fileComplaint({
+    required ComplaintCategory category,
+    required String subject,
+    required String description,
+    required bool anonymous,
+  }) async {
+    final me = _actor!;
+    final ref = _complaints.doc();
+    final now = DateTime.now();
+    final batch = _db.batch();
+    batch.set(
+      _identities.doc(ref.id),
+      ComplaintIdentity(
+        id: ref.id,
+        filedBy: me.uid,
+        filedByName: me.name,
+        filedByDepartment: me.department,
+        anonymous: anonymous,
+        category: category,
+        subject: subject,
+        status: ComplaintStatus.submitted,
+        createdAt: now,
+        updatedAt: now,
+      ).toMap(),
+    );
+    batch.set(
+      ref,
+      Complaint(
+        id: ref.id,
+        category: category,
+        subject: subject,
+        description: description,
+        anonymous: anonymous,
+        displayName: anonymous ? 'Anonymous' : me.name,
+        displayDepartment: anonymous ? '' : me.department,
+        status: ComplaintStatus.submitted,
+        createdAt: now,
+        updatedAt: now,
+      ).toMap(),
+    );
+    await batch.commit();
+    return ref.id;
+  }
+
+  @override
+  Stream<List<ComplaintReply>> watchReplies(String complaintId) => _complaints
+      .doc(complaintId)
+      .collection('replies')
+      .snapshots()
+      .map(
+        (s) =>
+            s.docs.map((d) => ComplaintReply.fromMap(d.id, d.data())).toList()
+              ..sort((a, b) => a.createdAt.compareTo(b.createdAt)),
+      );
+
+  @override
+  Future<void> addReply(String complaintId, String text) async {
+    final me = _actor!;
+    final committee = Rbac.canHandleComplaints(me);
+    var name = me.name;
+    if (!committee) {
+      final c = await _complaints.doc(complaintId).get();
+      if ((c.data()?['anonymous'] ?? false) == true) name = 'Complainant';
+    }
+    await _complaints
+        .doc(complaintId)
+        .collection('replies')
+        .add(
+          ComplaintReply(
+            id: '',
+            kind: 'reply',
+            byCommittee: committee,
+            authorName: name,
+            text: text,
+            createdAt: DateTime.now(),
+          ).toMap(),
+        );
+  }
+
+  @override
+  Future<void> setComplaintStatus(
+    String id,
+    ComplaintStatus status, {
+    String note = '',
+  }) async {
+    final me = _actor!;
+    final now = DateTime.now();
+    final subject = await _field(_complaints, id, 'subject');
+    final batch = _db.batch();
+    final change = {
+      'status': status.name,
+      'updatedAt': now.millisecondsSinceEpoch,
+    };
+    batch.update(_complaints.doc(id), change);
+    batch.update(_identities.doc(id), change);
+    batch.set(
+      _complaints.doc(id).collection('replies').doc(),
+      ComplaintReply(
+        id: '',
+        kind: 'status',
+        byCommittee: true,
+        authorName: me.name,
+        text: note.isEmpty ? 'Status changed to ${status.label}.' : note,
+        createdAt: now,
+      ).toMap(),
+    );
+    await batch.commit();
+    await _log('complaint.status', 'complaint', subject, details: status.label);
+  }
+
+  // ---- Activity log -----------------------------------------------------
+  @override
+  Stream<List<ActivityEntry>> watchActivity() => _db
+      .collection('activityLog')
+      .orderBy('createdAt', descending: true)
+      .limit(200)
+      .snapshots()
+      .map(
+        (s) =>
+            s.docs.map((d) => ActivityEntry.fromMap(d.id, d.data())).toList(),
+      );
 }

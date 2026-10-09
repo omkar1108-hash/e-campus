@@ -1,5 +1,6 @@
 import '../models/app_user.dart';
 import '../models/book.dart';
+import '../models/campus.dart';
 import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
@@ -125,6 +126,78 @@ abstract class Backend {
   Future<void> startTrip(String busId, double lat, double lng);
   Future<void> updateTripLocation(String busId, double lat, double lng);
   Future<void> endTrip(String busId);
+
+  // ---- Notices ----------------------------------------------------------
+  /// College-wide notices, newest first (everybody except drivers).
+  Stream<List<Notice>> watchNotices();
+
+  /// Notices marked public: readable before sign-in (opening page).
+  Stream<List<Notice>> watchPublicNotices();
+  Future<void> addNotice(Notice notice);
+  Future<void> deleteNotice(String id);
+
+  // ---- Emergency alerts ---------------------------------------------------
+  /// Alerts that have not been cleared, newest first. Everybody sees them.
+  Stream<List<EmergencyAlert>> watchActiveAlerts();
+  Future<void> sendAlert(String message);
+  Future<void> clearAlert(String id);
+
+  // ---- Timetable --------------------------------------------------------
+  /// Slots of every department, keyed by department.
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables();
+  Future<void> saveTimetable(String department, List<TimetableSlot> slots);
+
+  // ---- Assignments & notes ------------------------------------------------
+  /// Students: their department's items. Teachers: the ones they posted.
+  /// Admin and admin staff: everything.
+  Stream<List<Assignment>> watchAssignments(AppUser viewer);
+  Future<void> addAssignment(Assignment item);
+  Future<void> deleteAssignment(String id);
+
+  // ---- Attendance -------------------------------------------------------
+  /// Saves (or corrects) one lecture's attendance in a single step.
+  Future<void> saveAttendance(List<AttendanceRecord> records);
+
+  /// A student's own records.
+  Stream<List<AttendanceRecord>> watchMyAttendance(String studentUid);
+
+  /// Records a teacher marked.
+  Stream<List<AttendanceRecord>> watchMarkedAttendance(String teacherUid);
+
+  // ---- Complaints -------------------------------------------------------
+  /// The filer's own complaints (works for anonymous ones too).
+  Stream<List<ComplaintIdentity>> watchMyComplaints(String uid);
+
+  /// Committee and admin: every complaint. Anonymous ones carry no identity.
+  Stream<List<Complaint>> watchAllComplaints();
+  Stream<Complaint?> watchComplaint(String id);
+
+  /// Administrator only: who filed complaint [id].
+  Future<ComplaintIdentity?> getComplaintIdentity(String id);
+
+  /// Files a complaint and returns its id. The identity is stored apart
+  /// from the complaint, so an anonymous one stays anonymous to the committee.
+  Future<String> fileComplaint({
+    required ComplaintCategory category,
+    required String subject,
+    required String description,
+    required bool anonymous,
+  });
+  Stream<List<ComplaintReply>> watchReplies(String complaintId);
+
+  /// A reply by the committee or by the person who filed the complaint.
+  Future<void> addReply(String complaintId, String text);
+
+  /// Committee: moves a complaint along its status flow, with an optional note.
+  Future<void> setComplaintStatus(
+    String id,
+    ComplaintStatus status, {
+    String note = '',
+  });
+
+  // ---- Activity log -----------------------------------------------------
+  /// Admin only: newest 200 entries.
+  Stream<List<ActivityEntry>> watchActivity();
 }
 
 /// Deterministic id for a one-to-one chat between two users.

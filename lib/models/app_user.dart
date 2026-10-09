@@ -6,6 +6,7 @@ enum UserRole {
   libraryStaff('Library Staff'),
   busDriver('Bus Driver'),
   adminStaff('Admin Staff'),
+  grievanceCommittee('Grievance Committee'),
   admin('Administrator');
 
   const UserRole(this.label);

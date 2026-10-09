@@ -87,6 +87,7 @@ class Rbac {
         return const [
           UserRole.admin,
           UserRole.adminStaff,
+          UserRole.grievanceCommittee,
           UserRole.libraryStaff,
           UserRole.teacher,
           UserRole.student,
@@ -94,6 +95,7 @@ class Rbac {
         ];
       case UserRole.adminStaff:
         return const [
+          UserRole.grievanceCommittee,
           UserRole.libraryStaff,
           UserRole.teacher,
           UserRole.student,
@@ -123,6 +125,7 @@ class Rbac {
             UserRole.student,
             UserRole.classRep,
             UserRole.teacher,
+            UserRole.grievanceCommittee,
             UserRole.libraryStaff,
             UserRole.busDriver,
           ];
@@ -131,4 +134,44 @@ class Rbac {
 
   /// Teachers pick the class representatives of their own department.
   static bool canAssignClassReps(AppUser u) => u.role == UserRole.teacher;
+
+  // ---- Campus features ----------------------------------------------------
+  static bool isStudent(AppUser u) =>
+      u.role == UserRole.student || u.role == UserRole.classRep;
+
+  static bool _isAdminSide(AppUser u) =>
+      _is(u, {UserRole.admin, UserRole.adminStaff});
+
+  /// Notices, timetable, assignments, search: everybody except bus drivers.
+  static bool canReadNotices(AppUser u) => u.role != UserRole.busDriver;
+  static bool canPostNotices(AppUser u) => _isAdminSide(u);
+  static bool canViewTimetable(AppUser u) => u.role != UserRole.busDriver;
+  static bool canEditTimetable(AppUser u) => _isAdminSide(u);
+  static bool canSearch(AppUser u) => u.role != UserRole.busDriver;
+
+  /// Teachers mark attendance and post assignments / notes; students see
+  /// their own attendance percentage and their department's work.
+  static bool canMarkAttendance(AppUser u) => u.role == UserRole.teacher;
+  static bool canViewOwnAttendance(AppUser u) => isStudent(u);
+  static bool canPostAssignments(AppUser u) => u.role == UserRole.teacher;
+  static bool canViewAssignments(AppUser u) =>
+      isStudent(u) || u.role == UserRole.teacher || _isAdminSide(u);
+  static bool canDeleteAssignment(AppUser u, String createdBy) =>
+      _isAdminSide(u) || (canPostAssignments(u) && u.uid == createdBy);
+
+  /// Complaints: everybody files them, except the committee that handles
+  /// them. The committee sees every complaint; only the administrator can
+  /// see who filed an anonymous one.
+  static bool canFileComplaint(AppUser u) =>
+      u.role != UserRole.grievanceCommittee;
+  static bool canViewAllComplaints(AppUser u) =>
+      _is(u, {UserRole.grievanceCommittee, UserRole.admin});
+  static bool canHandleComplaints(AppUser u) =>
+      u.role == UserRole.grievanceCommittee;
+  static bool canSeeComplaintIdentity(AppUser u) => u.role == UserRole.admin;
+
+  /// Emergency alerts: only the administrator sends them.
+  static bool canSendAlert(AppUser u) => u.role == UserRole.admin;
+
+  static bool canViewActivityLog(AppUser u) => u.role == UserRole.admin;
 }

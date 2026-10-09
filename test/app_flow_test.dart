@@ -31,6 +31,9 @@ Future<void> _login(WidgetTester tester, String email) async {
   await tester.pumpAndSettle(const Duration(seconds: 1));
 }
 
+Finder _inDrawer(String title) =>
+    find.descendant(of: find.byType(Drawer), matching: find.text(title));
+
 Future<void> _openDrawer(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Open navigation menu'));
   await tester.pumpAndSettle();
@@ -38,7 +41,7 @@ Future<void> _openDrawer(WidgetTester tester) async {
 
 Future<void> _openMenuItem(WidgetTester tester, String title) async {
   await _openDrawer(tester);
-  await tester.tap(find.text(title));
+  await tester.tap(_inDrawer(title));
   await tester.pumpAndSettle();
 }
 
@@ -76,29 +79,31 @@ void main() {
     await _start(t);
     await _login(t, 'student@ecampus.demo');
     await _openDrawer(t);
-    expect(find.text('E-Library'), findsOneWidget);
-    expect(find.text('Tech News'), findsOneWidget);
-    expect(find.text('Manage Users'), findsNothing);
-    expect(find.text('Class Representatives'), findsNothing);
+    expect(_inDrawer('E-Library'), findsOneWidget);
+    expect(_inDrawer('Tech News'), findsOneWidget);
+    expect(_inDrawer('Manage Users'), findsNothing);
+    expect(_inDrawer('Class Representatives'), findsNothing);
   });
 
-  testWidgets('bus driver drawer is only dashboard, bus and chat', (t) async {
+  testWidgets('bus driver drawer is only dashboard, bus, chat and complaints', (
+    t,
+  ) async {
     await _start(t);
     await _login(t, 'driver@ecampus.demo');
     await _openDrawer(t);
-    expect(find.text('Bus Tracking'), findsOneWidget);
-    expect(find.text('Chat'), findsOneWidget);
-    expect(find.text('E-Library'), findsNothing);
-    expect(find.text('AI Chatbot'), findsNothing);
-    expect(find.text('Tech News'), findsNothing);
-    expect(find.text('Manage Users'), findsNothing);
+    expect(_inDrawer('Bus Tracking'), findsOneWidget);
+    expect(_inDrawer('Chat'), findsOneWidget);
+    expect(_inDrawer('E-Library'), findsNothing);
+    expect(_inDrawer('AI Chatbot'), findsNothing);
+    expect(_inDrawer('Tech News'), findsNothing);
+    expect(_inDrawer('Manage Users'), findsNothing);
   });
 
   testWidgets('admin and admin staff see Manage Users', (t) async {
     await _start(t);
     await _login(t, 'admin@ecampus.demo');
     await _openDrawer(t);
-    expect(find.text('Manage Users'), findsOneWidget);
+    expect(_inDrawer('Manage Users'), findsOneWidget);
   });
 
   testWidgets('admin staff cannot see administrator accounts', (t) async {
@@ -227,8 +232,8 @@ void main() {
     await _start(t);
     await _login(t, 'driver@ecampus.demo');
     await _openDrawer(t);
-    expect(find.text('Manage Buses'), findsNothing);
-    expect(find.text('Manage Users'), findsNothing);
+    expect(_inDrawer('Manage Buses'), findsNothing);
+    expect(_inDrawer('Manage Users'), findsNothing);
   });
 
   testWidgets('admin staff adds a bus with a driver and departments', (

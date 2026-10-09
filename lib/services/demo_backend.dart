@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../models/app_user.dart';
 import '../models/book.dart';
+import '../models/campus.dart';
 import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
@@ -29,6 +30,15 @@ class DemoBackend implements Backend {
   final Map<String, ChatSummary> _summaries = {};
   final Map<String, Map<String, DateTime>> _reads = {};
   final Map<String, Bus> _buses = {};
+  final List<Notice> _notices = [];
+  final List<EmergencyAlert> _alerts = [];
+  final Map<String, List<TimetableSlot>> _timetables = {};
+  final List<Assignment> _assignments = [];
+  final Map<String, AttendanceRecord> _attendance = {};
+  final Map<String, Complaint> _complaints = {};
+  final Map<String, ComplaintIdentity> _identities = {};
+  final Map<String, List<ComplaintReply>> _replies = {};
+  final List<ActivityEntry> _activity = [];
 
   final _usersCtl = StreamController<void>.broadcast();
   final _booksCtl = StreamController<void>.broadcast();
@@ -36,6 +46,7 @@ class DemoBackend implements Backend {
   final _chatCtl = StreamController<String>.broadcast();
   final _inboxCtl = StreamController<void>.broadcast();
   final _busCtl = StreamController<void>.broadcast();
+  final _campusCtl = StreamController<void>.broadcast();
 
   String? _signedInUid;
   int _idCounter = 0;
@@ -121,6 +132,12 @@ class DemoBackend implements Backend {
     _uidByEmail['iyer@ecampus.demo'] = 'u-teacher-mba';
     _passwords['u-teacher-mba'] = demoPassword;
     user(
+      'u-committee',
+      'committee@ecampus.demo',
+      'Grievance Committee',
+      UserRole.grievanceCommittee,
+    );
+    user(
       'u-driver',
       'driver@ecampus.demo',
       'Dinesh Driver',
@@ -187,6 +204,65 @@ class DemoBackend implements Backend {
       ),
     ]);
 
+    _notices.addAll([
+      Notice(
+        id: 'no1',
+        title: 'Semester exams from 2 November',
+        body:
+            'The exam timetable is on the notice board. Clear all dues '
+            'before 25 October.',
+        authorName: 'Sunil Staff',
+        createdAt: DateTime.now().subtract(const Duration(hours: 3)),
+        public: true,
+      ),
+      Notice(
+        id: 'no2',
+        title: 'Library timings extended',
+        body: 'The library stays open until 8 pm during exams.',
+        authorName: 'Asha Admin',
+        createdAt: DateTime.now().subtract(const Duration(days: 2)),
+      ),
+    ]);
+
+    _timetables['MCA'] = [
+      for (final d in weekDays) ...[
+        TimetableSlot(
+          day: d,
+          start: '09:00',
+          end: '10:00',
+          subject: 'Mobile Computing',
+          teacherUid: 'u-teacher',
+          teacherName: 'Prof. Rao',
+          room: 'Lab 2',
+        ),
+        TimetableSlot(
+          day: d,
+          start: '10:15',
+          end: '11:15',
+          subject: 'Data Mining',
+          teacherUid: 'u-teacher',
+          teacherName: 'Prof. Rao',
+          room: 'Room 12',
+        ),
+      ],
+    ];
+
+    _assignments.add(
+      Assignment(
+        id: 'as1',
+        kind: WorkKind.assignment,
+        department: 'MCA',
+        subject: 'Mobile Computing',
+        title: 'Build a Flutter login screen',
+        description: 'Submit the repository link by the due date.',
+        link: 'https://docs.flutter.dev/',
+        dueDate: DateTime.now().add(const Duration(days: 3)),
+        createdBy: 'u-teacher',
+        createdByName: 'Prof. Rao',
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+      ),
+    );
+
     _buses['bus1'] = const Bus(
       id: 'bus1',
       name: 'Bus 1 - North route',
@@ -234,6 +310,33 @@ class DemoBackend implements Backend {
   @override
   Future<void> signOut() async => _signedInUid = null;
 
+  AppUser? get _actor => _usersByUid[_signedInUid];
+
+  void _log(
+    String action,
+    String targetType,
+    String targetLabel, {
+    String details = '',
+  }) {
+    final me = _actor;
+    if (me == null) return;
+    _activity.insert(
+      0,
+      ActivityEntry(
+        id: _nextId(),
+        action: action,
+        actorUid: me.uid,
+        actorName: me.name,
+        actorRole: me.role.name,
+        targetType: targetType,
+        targetLabel: targetLabel,
+        details: details,
+        createdAt: DateTime.now(),
+      ),
+    );
+    _campusCtl.add(null);
+  }
+
   // ---- Accounts ---------------------------------------------------------
   @override
   Future<void> createAccount({
@@ -260,6 +363,12 @@ class DemoBackend implements Backend {
     _uidByEmail[key] = uid;
     _passwords[uid] = demoPassword;
     _usersCtl.add(null);
+    _log(
+      'account.created',
+      'account',
+      name,
+      details: '${role.label}, $department',
+    );
   }
 
   @override
@@ -278,6 +387,12 @@ class DemoBackend implements Backend {
       gender: user.gender,
     );
     _usersCtl.add(null);
+    _log(
+      'account.updated',
+      'account',
+      user.name,
+      details: '${user.role.label}, ${user.department}',
+    );
   }
 
   @override
@@ -286,6 +401,7 @@ class DemoBackend implements Backend {
     if (u == null) return;
     _usersByUid[uid] = u.copyWith(active: active);
     _usersCtl.add(null);
+    _log(active ? 'account.enabled' : 'account.disabled', 'account', u.name);
   }
 
   @override
@@ -369,18 +485,29 @@ class DemoBackend implements Backend {
     String id, {
     required bool approve,
     String reason = '',
-  }) async => _replaceBook(
-    id,
-    (b) => b.copyWith(
-      status: approve ? BookStatus.approved : BookStatus.rejected,
-      rejectReason: approve ? '' : reason,
-    ),
-  );
+  }) async {
+    final title = _books.where((b) => b.id == id).map((b) => b.title).toList();
+    _replaceBook(
+      id,
+      (b) => b.copyWith(
+        status: approve ? BookStatus.approved : BookStatus.rejected,
+        rejectReason: approve ? '' : reason,
+      ),
+    );
+    _log(
+      approve ? 'book.approved' : 'book.rejected',
+      'book',
+      title.isEmpty ? id : title.first,
+      details: approve ? '' : reason,
+    );
+  }
 
   @override
   Future<void> deleteBook(String id) async {
+    final title = _books.where((b) => b.id == id).map((b) => b.title).toList();
     _books.removeWhere((b) => b.id == id);
     _booksCtl.add(null);
+    _log('book.deleted', 'book', title.isEmpty ? id : title.first);
   }
 
   @override
@@ -413,8 +540,10 @@ class DemoBackend implements Backend {
 
   @override
   Future<void> deleteNews(String id) async {
+    final title = _news.where((n) => n.id == id).map((n) => n.title).toList();
     _news.removeWhere((n) => n.id == id);
     _newsCtl.add(null);
+    _log('news.deleted', 'news', title.isEmpty ? id : title.first);
   }
 
   // ---- Chat -------------------------------------------------------------
@@ -559,6 +688,7 @@ class DemoBackend implements Backend {
         case UserRole.adminStaff:
         case UserRole.teacher:
         case UserRole.libraryStaff:
+        case UserRole.grievanceCommittee:
           return true;
         case UserRole.busDriver:
           return b.driverUid == viewer.uid;
@@ -608,8 +738,10 @@ class DemoBackend implements Backend {
 
   @override
   Future<void> deleteBus(String id) async {
+    final name = _buses[id]?.name ?? id;
     _buses.remove(id);
     _busCtl.add(null);
+    _log('bus.deleted', 'bus', name);
   }
 
   Bus _withTrip(
@@ -660,4 +792,319 @@ class DemoBackend implements Backend {
     _buses[busId] = _withTrip(b, active: false);
     _busCtl.add(null);
   }
+
+  // ---- Notices ----------------------------------------------------------
+  @override
+  Stream<List<Notice>> watchNotices() => _live(
+    _campusCtl.stream,
+    () => _notices.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
+
+  @override
+  Stream<List<Notice>> watchPublicNotices() => _live(
+    _campusCtl.stream,
+    () =>
+        _notices.where((n) => n.public).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
+
+  @override
+  Future<void> addNotice(Notice n) async {
+    _notices.add(
+      Notice(
+        id: _nextId(),
+        title: n.title,
+        body: n.body,
+        authorName: n.authorName,
+        createdAt: n.createdAt,
+        image: n.image,
+        public: n.public,
+      ),
+    );
+    _campusCtl.add(null);
+  }
+
+  @override
+  Future<void> deleteNotice(String id) async {
+    final title = _notices
+        .where((n) => n.id == id)
+        .map((n) => n.title)
+        .toList();
+    _notices.removeWhere((n) => n.id == id);
+    _campusCtl.add(null);
+    _log('notice.deleted', 'notice', title.isEmpty ? id : title.first);
+  }
+
+  // ---- Emergency alerts ---------------------------------------------------
+  @override
+  Stream<List<EmergencyAlert>> watchActiveAlerts() => _live(
+    _campusCtl.stream,
+    () =>
+        _alerts.where((a) => a.active).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
+
+  @override
+  Future<void> sendAlert(String message) async {
+    _alerts.add(
+      EmergencyAlert(
+        id: _nextId(),
+        message: message,
+        authorName: _actor?.name ?? '',
+        createdAt: DateTime.now(),
+      ),
+    );
+    _campusCtl.add(null);
+    _log('alert.sent', 'alert', message);
+  }
+
+  @override
+  Future<void> clearAlert(String id) async {
+    final i = _alerts.indexWhere((a) => a.id == id);
+    if (i < 0) return;
+    final a = _alerts[i];
+    _alerts[i] = EmergencyAlert(
+      id: a.id,
+      message: a.message,
+      authorName: a.authorName,
+      createdAt: a.createdAt,
+      active: false,
+    );
+    _campusCtl.add(null);
+    _log('alert.cleared', 'alert', a.message);
+  }
+
+  // ---- Timetable --------------------------------------------------------
+  @override
+  Stream<Map<String, List<TimetableSlot>>> watchTimetables() => _live(
+    _campusCtl.stream,
+    () => {
+      for (final e in _timetables.entries)
+        e.key: (List.of(e.value)..sort((a, b) => a.order.compareTo(b.order))),
+    },
+  );
+
+  @override
+  Future<void> saveTimetable(
+    String department,
+    List<TimetableSlot> slots,
+  ) async {
+    _timetables[department] = List.of(slots);
+    _campusCtl.add(null);
+  }
+
+  // ---- Assignments & notes ------------------------------------------------
+  @override
+  Stream<List<Assignment>> watchAssignments(AppUser viewer) =>
+      _live(_campusCtl.stream, () {
+        bool visible(Assignment a) {
+          if (viewer.role == UserRole.admin ||
+              viewer.role == UserRole.adminStaff) {
+            return true;
+          }
+          if (viewer.role == UserRole.teacher) return a.createdBy == viewer.uid;
+          if (Rbac.isStudent(viewer)) return a.department == viewer.department;
+          return false;
+        }
+
+        return _assignments.where(visible).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      });
+
+  @override
+  Future<void> addAssignment(Assignment a) async {
+    _assignments.add(
+      Assignment(
+        id: _nextId(),
+        kind: a.kind,
+        department: a.department,
+        subject: a.subject,
+        title: a.title,
+        description: a.description,
+        link: a.link,
+        dueDate: a.dueDate,
+        createdBy: a.createdBy,
+        createdByName: a.createdByName,
+        createdAt: a.createdAt,
+      ),
+    );
+    _campusCtl.add(null);
+  }
+
+  @override
+  Future<void> deleteAssignment(String id) async {
+    _assignments.removeWhere((a) => a.id == id);
+    _campusCtl.add(null);
+  }
+
+  // ---- Attendance -------------------------------------------------------
+  @override
+  Future<void> saveAttendance(List<AttendanceRecord> records) async {
+    for (final r in records) {
+      _attendance[r.docId] = r;
+    }
+    _campusCtl.add(null);
+  }
+
+  List<AttendanceRecord> _recordsWhere(bool Function(AttendanceRecord) f) =>
+      _attendance.values.where(f).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  @override
+  Stream<List<AttendanceRecord>> watchMyAttendance(String studentUid) => _live(
+    _campusCtl.stream,
+    () => _recordsWhere((r) => r.studentUid == studentUid),
+  );
+
+  @override
+  Stream<List<AttendanceRecord>> watchMarkedAttendance(String teacherUid) =>
+      _live(
+        _campusCtl.stream,
+        () => _recordsWhere((r) => r.teacherUid == teacherUid),
+      );
+
+  // ---- Complaints -------------------------------------------------------
+  @override
+  Stream<List<ComplaintIdentity>> watchMyComplaints(String uid) => _live(
+    _campusCtl.stream,
+    () =>
+        _identities.values.where((i) => i.filedBy == uid).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
+
+  @override
+  Stream<List<Complaint>> watchAllComplaints() => _live(
+    _campusCtl.stream,
+    () =>
+        _complaints.values.toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
+  );
+
+  @override
+  Stream<Complaint?> watchComplaint(String id) =>
+      _live(_campusCtl.stream, () => _complaints[id]);
+
+  @override
+  Future<ComplaintIdentity?> getComplaintIdentity(String id) async =>
+      _identities[id];
+
+  @override
+  Future<String> fileComplaint({
+    required ComplaintCategory category,
+    required String subject,
+    required String description,
+    required bool anonymous,
+  }) async {
+    final me = _actor!;
+    final id = _nextId();
+    final now = DateTime.now();
+    _identities[id] = ComplaintIdentity(
+      id: id,
+      filedBy: me.uid,
+      filedByName: me.name,
+      filedByDepartment: me.department,
+      anonymous: anonymous,
+      category: category,
+      subject: subject,
+      status: ComplaintStatus.submitted,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _complaints[id] = Complaint(
+      id: id,
+      category: category,
+      subject: subject,
+      description: description,
+      anonymous: anonymous,
+      displayName: anonymous ? 'Anonymous' : me.name,
+      displayDepartment: anonymous ? '' : me.department,
+      status: ComplaintStatus.submitted,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _campusCtl.add(null);
+    return id;
+  }
+
+  @override
+  Stream<List<ComplaintReply>> watchReplies(String complaintId) => _live(
+    _campusCtl.stream,
+    () => List.of(_replies[complaintId] ?? const []),
+  );
+
+  @override
+  Future<void> addReply(String complaintId, String text) async {
+    final me = _actor!;
+    final committee = Rbac.canHandleComplaints(me);
+    final c = _complaints[complaintId];
+    if (c == null) return;
+    _replies
+        .putIfAbsent(complaintId, () => [])
+        .add(
+          ComplaintReply(
+            id: _nextId(),
+            kind: 'reply',
+            byCommittee: committee,
+            authorName: !committee && c.anonymous ? 'Complainant' : me.name,
+            text: text,
+            createdAt: DateTime.now(),
+          ),
+        );
+    _campusCtl.add(null);
+  }
+
+  @override
+  Future<void> setComplaintStatus(
+    String id,
+    ComplaintStatus status, {
+    String note = '',
+  }) async {
+    final c = _complaints[id];
+    final i = _identities[id];
+    if (c == null || i == null) return;
+    final now = DateTime.now();
+    _complaints[id] = Complaint(
+      id: c.id,
+      category: c.category,
+      subject: c.subject,
+      description: c.description,
+      anonymous: c.anonymous,
+      displayName: c.displayName,
+      displayDepartment: c.displayDepartment,
+      status: status,
+      createdAt: c.createdAt,
+      updatedAt: now,
+    );
+    _identities[id] = ComplaintIdentity(
+      id: i.id,
+      filedBy: i.filedBy,
+      filedByName: i.filedByName,
+      filedByDepartment: i.filedByDepartment,
+      anonymous: i.anonymous,
+      category: i.category,
+      subject: i.subject,
+      status: status,
+      createdAt: i.createdAt,
+      updatedAt: now,
+    );
+    _replies
+        .putIfAbsent(id, () => [])
+        .add(
+          ComplaintReply(
+            id: _nextId(),
+            kind: 'status',
+            byCommittee: true,
+            authorName: _actor?.name ?? '',
+            text: note.isEmpty ? 'Status changed to ${status.label}.' : note,
+            createdAt: now,
+          ),
+        );
+    _campusCtl.add(null);
+    _log('complaint.status', 'complaint', c.subject, details: status.label);
+  }
+
+  // ---- Activity log -----------------------------------------------------
+  @override
+  Stream<List<ActivityEntry>> watchActivity() =>
+      _live(_campusCtl.stream, () => _activity.take(200).toList());
 }
