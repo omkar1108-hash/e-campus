@@ -78,6 +78,7 @@ void main() {
         Rbac.canManageBooks(_u(r)),
         {
           UserRole.teacher,
+          UserRole.hod,
           UserRole.libraryStaff,
           UserRole.adminStaff,
           UserRole.admin,
@@ -101,6 +102,7 @@ void main() {
       expect(roles.toSet(), {
         UserRole.grievanceCommittee,
         UserRole.libraryStaff,
+        UserRole.hod,
         UserRole.teacher,
         UserRole.student,
         UserRole.busDriver,
@@ -151,8 +153,9 @@ void main() {
         _u(UserRole.classRep, uid: 'b$i', gender: Gender.male, dept: dept),
     ];
 
-    test('teacher assigns classreps for own department only', () {
-      expect(Rbac.canAssignClassReps(_u(UserRole.teacher)), isTrue);
+    test('only the head of department assigns class reps', () {
+      expect(Rbac.canAssignClassReps(_u(UserRole.hod)), isTrue);
+      expect(Rbac.canAssignClassReps(_u(UserRole.teacher)), isFalse);
       expect(Rbac.canAssignClassReps(_u(UserRole.classRep)), isFalse);
       expect(Rbac.canAssignClassReps(_u(UserRole.admin)), isFalse);
     });

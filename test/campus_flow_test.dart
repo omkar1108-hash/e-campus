@@ -22,6 +22,7 @@ Future<void> tapButton(WidgetTester t, String label) async {
 }
 
 void main() {
+  audienceTests();
   assignmentAccessTests();
   backTests();
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -86,7 +87,8 @@ void main() {
       await login(t, 'driver@ecampus.demo');
       expect(find.text('Your bus'), findsOneWidget);
       expect(find.text('Messages'), findsOneWidget);
-      expect(find.text('Notices'), findsNothing);
+      // Drivers read the notices aimed at them (this one is for everyone).
+      expect(find.text('Notices'), findsOneWidget);
       expect(find.text('Tech news'), findsNothing);
       expect(find.text('E-Library'), findsNothing);
     });
@@ -114,108 +116,146 @@ void main() {
   });
 
   group('complaints', () {
-    testWidgets(
-      'anonymous complaint: committee cannot see the name, admin can',
-      (t) async {
-        await startApp(t);
-        await login(t, 'student@ecampus.demo');
-        await openMenuItem(t, 'Complaints');
-        expect(find.textContaining('not filed any complaints'), findsOneWidget);
-        await t.tap(find.text('File a complaint'));
-        await t.pumpAndSettle();
-        await typeInto(t, 0, 'Broken projector');
-        await typeInto(
-          t,
-          1,
-          'The projector in room 4 has not worked for a week',
-        );
-        await t.tap(find.byType(Switch));
-        await t.pumpAndSettle();
-        expect(find.textContaining('will not see your name'), findsOneWidget);
-        await tapButton(t, 'Submit');
-        expect(find.text('Complaint submitted'), findsOneWidget);
-        expect(find.text('Broken projector'), findsOneWidget);
-        expect(find.text('Submitted'), findsOneWidget);
+    testWidgets('full complaint cycle with confirmation by the complainant', (
+      t,
+    ) async {
+      await startApp(t);
+      Future<void> asUser(String email) async {
+        if (find.byType(BackButton).evaluate().isNotEmpty) {
+          await t.pageBack();
+          await t.pumpAndSettle();
+        }
+        if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
+          await signOut(t);
+        }
+        await login(t, email);
+      }
 
-        // The committee sees the complaint but not who filed it.
-        await signOut(t);
-        await login(t, 'committee@ecampus.demo');
+      Future<void> open(String email) async {
+        await asUser(email);
         await openMenuItem(t, 'Complaints');
-        expect(find.text('Broken projector'), findsOneWidget);
-        expect(find.textContaining('Anonymous'), findsOneWidget);
-        expect(find.textContaining('Sneha'), findsNothing);
         await t.tap(find.text('Broken projector'));
         await t.pumpAndSettle();
-        expect(find.text('Filed anonymously'), findsOneWidget);
-        expect(find.textContaining('Sneha'), findsNothing);
-        expect(find.byKey(const ValueKey('admin-identity')), findsNothing);
-        await t.tap(find.text('Mark In review'));
-        await t.pumpAndSettle();
-        await t.enterText(find.byType(TextField).last, 'We are on it');
+      }
+
+      Future<void> confirm() async {
         await t.tap(find.text('Confirm'));
         await t.pumpAndSettle();
-        expect(find.text('In review'), findsWidgets);
-        expect(find.text('We are on it'), findsOneWidget);
-        await t.enterText(
-          find.byType(TextField),
-          'Technician booked for Monday',
-        );
-        await t.tap(find.byTooltip('Send reply'));
-        await t.pumpAndSettle();
-        expect(find.text('Technician booked for Monday'), findsOneWidget);
-        await t.pageBack();
-        await t.pumpAndSettle();
+      }
 
-        // The student follows the status and answers.
+      await login(t, 'student@ecampus.demo');
+      await openMenuItem(t, 'Complaints');
+      expect(find.textContaining('not filed any complaints'), findsOneWidget);
+      await t.tap(find.text('File a complaint'));
+      await t.pumpAndSettle();
+      await typeInto(t, 0, 'Broken projector');
+      await typeInto(t, 1, 'The projector in room 4 has not worked for a week');
+      await t.tap(find.byType(Switch));
+      await t.pumpAndSettle();
+      expect(find.textContaining('will not see your name'), findsOneWidget);
+      await tapButton(t, 'Submit');
+      expect(find.text('Complaint submitted'), findsOneWidget);
+      expect(find.text('Sent'), findsOneWidget);
+
+      // The committee sees the complaint but not who filed it.
+      await asUser('committee@ecampus.demo');
+      await openMenuItem(t, 'Complaints');
+      expect(find.textContaining('Anonymous'), findsOneWidget);
+      expect(find.textContaining('Sneha'), findsNothing);
+      await t.tap(find.text('Broken projector'));
+      await t.pumpAndSettle();
+      expect(find.text('Filed anonymously'), findsOneWidget);
+      expect(find.byKey(const ValueKey('admin-identity')), findsNothing);
+      await t.tap(find.text('Mark Working on it'));
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField).last, 'We are on it');
+      await confirm();
+      expect(find.text('We are on it'), findsOneWidget);
+      await t.enterText(find.byType(TextField), 'Technician booked for Monday');
+      await t.tap(find.byTooltip('Send reply'));
+      await t.pumpAndSettle();
+      expect(find.text('Technician booked for Monday'), findsOneWidget);
+      await t.tap(find.text('Mark Resolved'));
+      await t.pumpAndSettle();
+      await confirm();
+      // Resolved is not the end: the committee waits for the complainant.
+      expect(find.text('Mark Resolved'), findsNothing);
+      expect(find.text('Mark Rejected'), findsNothing);
+
+      // The student says it is not fixed: back to "Working on it".
+      await open('student@ecampus.demo');
+      expect(find.text('Technician booked for Monday'), findsOneWidget);
+      await t.tap(find.text('No, work on it again'));
+      await t.pumpAndSettle();
+      await confirm();
+      expect(find.text('Yes, it is resolved'), findsNothing);
+      expect(find.text('Working on it'), findsWidgets);
+      await t.enterText(find.byType(TextField), 'Still flickering');
+      await t.tap(find.byTooltip('Send reply'));
+      await t.pumpAndSettle();
+      expect(find.text('Still flickering'), findsOneWidget);
+      expect(find.textContaining('Complainant'), findsWidgets);
+
+      // The committee works again and resolves; this time it is confirmed.
+      await open('committee@ecampus.demo');
+      await t.tap(find.text('Mark Resolved'));
+      await t.pumpAndSettle();
+      await confirm();
+      await open('student@ecampus.demo');
+      await t.tap(find.text('Yes, it is resolved'));
+      await t.pumpAndSettle();
+      await confirm();
+      expect(find.text('Closed'), findsWidgets);
+      expect(find.byTooltip('Send reply'), findsNothing);
+
+      // Admin staff read it too, but the name stays hidden from them.
+      await open('staff@ecampus.demo');
+      expect(find.text('Filed anonymously'), findsOneWidget);
+      expect(find.byKey(const ValueKey('admin-identity')), findsNothing);
+      expect(find.byTooltip('Send reply'), findsNothing);
+      expect(find.text('Mark Resolved'), findsNothing);
+
+      // The administrator can see who it was, and only reads.
+      await open('admin@ecampus.demo');
+      expect(find.byKey(const ValueKey('admin-identity')), findsOneWidget);
+      expect(find.text('Filed by Sneha Student (MCA)'), findsOneWidget);
+      expect(find.byTooltip('Send reply'), findsNothing);
+    });
+
+    testWidgets(
+      'a rejected complaint is closed, a resolved one waits for the complainant',
+      (t) async {
+        final backend = await startApp(t);
+        await login(t, 'student@ecampus.demo');
+        Future<String> file(String subject) => backend.fileComplaint(
+          category: ComplaintCategory.library,
+          subject: subject,
+          description: 'Charged twice',
+          anonymous: false,
+        );
+        final fine = await file('Late fine');
+        final noise = await file('Noise');
+        await signOut(t);
+        await login(t, 'committee@ecampus.demo');
+        await backend.setComplaintStatus(fine, ComplaintStatus.resolved);
+        await backend.setComplaintStatus(noise, ComplaintStatus.rejected);
         await signOut(t);
         await login(t, 'student@ecampus.demo');
         await openMenuItem(t, 'Complaints');
-        expect(find.text('In review'), findsOneWidget);
-        await t.tap(find.text('Broken projector'));
+        await t.tap(find.text('Late fine'));
         await t.pumpAndSettle();
-        expect(find.text('Technician booked for Monday'), findsOneWidget);
-        await t.enterText(find.byType(TextField), 'Thank you');
-        await t.tap(find.byTooltip('Send reply'));
-        await t.pumpAndSettle();
-        expect(find.text('Thank you'), findsOneWidget);
-        expect(find.textContaining('Complainant'), findsOneWidget);
+        // Waiting for the complainant: may confirm, and may still reply.
+        expect(find.text('Yes, it is resolved'), findsOneWidget);
+        expect(find.byTooltip('Send reply'), findsOneWidget);
         await t.pageBack();
         await t.pumpAndSettle();
-
-        // The administrator can see who it was.
-        await signOut(t);
-        await login(t, 'admin@ecampus.demo');
-        await openMenuItem(t, 'Complaints');
-        await t.tap(find.text('Broken projector'));
+        await t.tap(find.text('Noise'));
         await t.pumpAndSettle();
-        expect(find.byKey(const ValueKey('admin-identity')), findsOneWidget);
-        expect(find.text('Filed by Sneha Student (MCA)'), findsOneWidget);
-        // ...but only reads: there is no reply box and no status button.
+        expect(find.text('Rejected'), findsWidgets);
+        expect(find.text('Yes, it is resolved'), findsNothing);
         expect(find.byTooltip('Send reply'), findsNothing);
-        expect(find.text('Mark Resolved'), findsNothing);
       },
     );
-
-    testWidgets('a resolved complaint is closed to further replies', (t) async {
-      final backend = await startApp(t);
-      await login(t, 'student@ecampus.demo');
-      final id = await backend.fileComplaint(
-        category: ComplaintCategory.library,
-        subject: 'Late fine',
-        description: 'Charged twice',
-        anonymous: false,
-      );
-      await signOut(t);
-      await login(t, 'committee@ecampus.demo');
-      await backend.setComplaintStatus(id, ComplaintStatus.resolved);
-      await signOut(t);
-      await login(t, 'student@ecampus.demo');
-      await openMenuItem(t, 'Complaints');
-      await t.tap(find.text('Late fine'));
-      await t.pumpAndSettle();
-      expect(find.text('Resolved'), findsWidgets);
-      expect(find.byTooltip('Send reply'), findsNothing);
-    });
 
     testWidgets('the committee cannot file complaints, others can', (t) async {
       await startApp(t);
@@ -239,7 +279,7 @@ void main() {
       await t.enterText(find.byType(TextField), 'Campus closed due to rain');
       await t.tap(find.text('Send alert'));
       await t.pumpAndSettle();
-      await tapButton(t, 'Send to everyone');
+      await tapButton(t, 'Send alert now');
       // A pop-up appears once, then the banner stays.
       expect(find.byKey(const ValueKey('alert-dialog')), findsOneWidget);
       await t.tap(find.text('OK'));
@@ -602,6 +642,115 @@ void assignmentAccessTests() {
         ),
         findsNothing,
         reason: who,
+      );
+      await t.tap(find.text('Sign out'));
+      await t.pumpAndSettle();
+    }
+  });
+}
+
+void audienceTests() {
+  testWidgets('a notice for one branch and group reaches only them', (t) async {
+    await startApp(t);
+    await login(t, 'staff@ecampus.demo');
+    await openMenuItem(t, 'Notices');
+    await t.tap(find.text('New notice'));
+    await t.pumpAndSettle();
+    await typeInto(t, 0, 'MCA students lab test');
+    await typeInto(t, 1, 'Bring ID cards');
+    expect(find.text('Goes to: All branches · everyone'), findsOneWidget);
+    await t.ensureVisible(find.byKey(const ValueKey('dept-MCA')));
+    await t.tap(find.byKey(const ValueKey('dept-MCA')));
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.byKey(const ValueKey('group-student')));
+    await t.tap(find.byKey(const ValueKey('group-student')));
+    await t.pumpAndSettle();
+    expect(find.text('Goes to: MCA · Students'), findsOneWidget);
+    // Only notices for everybody can be shown on the opening page.
+    final sw = t.widget<SwitchListTile>(find.byType(SwitchListTile));
+    expect(sw.onChanged, isNull);
+    await tapButton(t, 'Publish');
+    expect(find.text('MCA students lab test'), findsOneWidget);
+    expect(find.text('For: MCA · Students'), findsOneWidget);
+
+    for (final (email, sees) in [
+      ('student@ecampus.demo', true),
+      ('rep@ecampus.demo', true),
+      ('meena@ecampus.demo', false), // MBA student
+      ('teacher@ecampus.demo', false),
+      ('driver@ecampus.demo', false),
+    ]) {
+      await signOut(t);
+      await login(t, email);
+      await openMenuItem(t, 'Notices');
+      expect(
+        find.text('MCA students lab test'),
+        sees ? findsOneWidget : findsNothing,
+        reason: email,
+      );
+    }
+  });
+
+  testWidgets('a notice for bus drivers is readable by drivers', (t) async {
+    await startApp(t);
+    await login(t, 'admin@ecampus.demo');
+    await openMenuItem(t, 'Notices');
+    await t.tap(find.text('New notice'));
+    await t.pumpAndSettle();
+    await typeInto(t, 0, 'Diesel rates');
+    await typeInto(t, 1, 'Fill at the college pump');
+    await t.ensureVisible(find.byKey(const ValueKey('group-driver')));
+    await t.tap(find.byKey(const ValueKey('group-driver')));
+    await tapButton(t, 'Publish');
+    await signOut(t);
+    await login(t, 'driver@ecampus.demo');
+    await openMenuItem(t, 'Notices');
+    expect(find.text('Diesel rates'), findsOneWidget);
+    await signOut(t);
+    await login(t, 'student@ecampus.demo');
+    await openMenuItem(t, 'Notices');
+    expect(find.text('Diesel rates'), findsNothing);
+  });
+
+  testWidgets('an alert for students only does not reach drivers', (t) async {
+    await startApp(t);
+    await login(t, 'admin@ecampus.demo');
+    await openMenuItem(t, 'Emergency Alert');
+    await t.enterText(find.byType(TextField), 'Exam hall changed');
+    await t.ensureVisible(find.byKey(const ValueKey('group-student')));
+    await t.tap(find.byKey(const ValueKey('group-student')));
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.text('Send alert'));
+    await t.tap(find.text('Send alert'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('Students will see'), findsOneWidget);
+    await tapButton(t, 'Send alert now');
+    await t.tap(find.text('OK'));
+    await t.pumpAndSettle();
+
+    await signOut(t);
+    await login(t, 'driver@ecampus.demo');
+    expect(find.byKey(const ValueKey('alert-banner')), findsNothing);
+    await signOut(t);
+    await login(t, 'meena@ecampus.demo');
+    expect(find.byKey(const ValueKey('alert-banner')), findsOneWidget);
+  });
+
+  testWidgets('students and class reps cannot post notices or alerts', (
+    t,
+  ) async {
+    await startApp(t);
+    for (final who in ['student', 'rep']) {
+      await login(t, '$who@ecampus.demo');
+      await openMenuItem(t, 'Notices');
+      expect(find.text('New notice'), findsNothing);
+      await openDrawer(t);
+      expect(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.text('Emergency Alert'),
+        ),
+        findsNothing,
       );
       await t.tap(find.text('Sign out'));
       await t.pumpAndSettle();

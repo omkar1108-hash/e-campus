@@ -41,14 +41,14 @@ void main() {
       expect(_who(Rbac.canPostNotices), admins);
       expect(_who(Rbac.canEditTimetable), admins);
       final noDrivers = UserRole.values.toSet()..remove(UserRole.busDriver);
-      expect(_who(Rbac.canReadNotices), noDrivers);
+      expect(_who(Rbac.canReadNotices), UserRole.values.toSet());
       expect(_who(Rbac.canViewTimetable), noDrivers);
       expect(_who(Rbac.canSearch), noDrivers);
     });
 
     test('attendance and assignments belong to teachers', () {
-      expect(_who(Rbac.canMarkAttendance), {UserRole.teacher});
-      expect(_who(Rbac.canPostAssignments), {UserRole.teacher});
+      expect(_who(Rbac.canMarkAttendance), {UserRole.teacher, UserRole.hod});
+      expect(_who(Rbac.canPostAssignments), {UserRole.teacher, UserRole.hod});
       expect(_who(Rbac.canViewOwnAttendance), {
         UserRole.student,
         UserRole.classRep,
@@ -57,6 +57,7 @@ void main() {
         UserRole.student,
         UserRole.classRep,
         UserRole.teacher,
+        UserRole.hod,
       });
     });
 
@@ -77,17 +78,32 @@ void main() {
         _who(Rbac.canFileComplaint),
         UserRole.values.toSet()..remove(UserRole.grievanceCommittee),
       );
-      expect(_who(Rbac.canViewAllComplaints), {
-        UserRole.grievanceCommittee,
-        UserRole.admin,
-      });
-      expect(_who(Rbac.canHandleComplaints), {UserRole.grievanceCommittee});
-      expect(_who(Rbac.canSeeComplaintIdentity), {UserRole.admin});
     });
 
     test('alerts and the activity log are administrator only', () {
       expect(_who(Rbac.canSendAlert), {UserRole.admin});
       expect(_who(Rbac.canViewActivityLog), {UserRole.admin});
+    });
+
+    test('only the head of department chooses class representatives', () {
+      expect(_who(Rbac.canAssignClassReps), {UserRole.hod});
+    });
+
+    test('heads of department teach like teachers', () {
+      expect(_who(Rbac.canMarkAttendance), {UserRole.teacher, UserRole.hod});
+      expect(_who(Rbac.canPostAssignments), {UserRole.teacher, UserRole.hod});
+      expect(_who(Rbac.canVerifyBooks), {UserRole.libraryStaff});
+      expect(Rbac.initialBookStatus(_u(UserRole.hod)).name, 'pending');
+    });
+
+    test('the committee, admin staff and admin see all complaints', () {
+      expect(_who(Rbac.canViewAllComplaints), {
+        UserRole.grievanceCommittee,
+        UserRole.adminStaff,
+        UserRole.admin,
+      });
+      expect(_who(Rbac.canHandleComplaints), {UserRole.grievanceCommittee});
+      expect(_who(Rbac.canSeeComplaintIdentity), {UserRole.admin});
     });
 
     test('admin and admin staff may create the committee role', () {
@@ -170,7 +186,15 @@ void main() {
       ]);
       expect(ComplaintStatus.resolved.next, isEmpty);
       expect(ComplaintStatus.rejected.next, isEmpty);
-      expect(ComplaintStatus.resolved.isFinal, isTrue);
+      // The complainant confirms a fix, or sends it back for more work.
+      expect(ComplaintStatus.resolved.filerNext, [
+        ComplaintStatus.closed,
+        ComplaintStatus.inReview,
+      ]);
+      expect(ComplaintStatus.submitted.filerNext, isEmpty);
+      expect(ComplaintStatus.resolved.isFinal, isFalse);
+      expect(ComplaintStatus.closed.isFinal, isTrue);
+      expect(ComplaintStatus.rejected.isFinal, isTrue);
       expect(ComplaintStatus.inReview.isFinal, isFalse);
     });
 
@@ -189,7 +213,123 @@ void main() {
     });
   });
 
+  group('audiences', () {
+    test(
+      'everyone with no branch means all four target values match anyone',
+      () {
+        expect(Audience.everyone.targets, ['all|all']);
+        for (final r in UserRole.values) {
+          expect(Audience.everyone.includes(_u(r)), isTrue, reason: r.name);
+        }
+      },
+    );
+
+    test('groups: students, teachers, other staff and drivers', () {
+      expect(Audience.groupOf(UserRole.classRep), 'student');
+      expect(Audience.groupOf(UserRole.hod), 'teacher');
+      expect(Audience.groupOf(UserRole.busDriver), 'driver');
+      for (final r in [
+        UserRole.libraryStaff,
+        UserRole.adminStaff,
+        UserRole.admin,
+        UserRole.grievanceCommittee,
+      ]) {
+        expect(Audience.groupOf(r), 'staff');
+      }
+    });
+
+    test('a branch plus a group narrows who is included', () {
+      const a = Audience(departments: ['MCA'], groups: ['student']);
+      expect(a.targets, ['MCA|student']);
+      expect(a.includes(_u(UserRole.student)), isTrue);
+      expect(a.includes(_u(UserRole.classRep)), isTrue);
+      expect(a.includes(_u(UserRole.student, dept: 'MBA')), isFalse);
+      expect(a.includes(_u(UserRole.teacher)), isFalse);
+    });
+
+    test('several branches and groups combine', () {
+      const a = Audience(
+        departments: ['MCA', 'MBA'],
+        groups: ['teacher', 'staff'],
+      );
+      expect(a.targets.length, 4);
+      expect(a.includes(_u(UserRole.hod, dept: 'MBA')), isTrue);
+      expect(a.includes(_u(UserRole.libraryStaff)), isTrue);
+      expect(a.includes(_u(UserRole.student)), isFalse);
+      expect(a.includes(_u(UserRole.teacher, dept: 'Civil')), isFalse);
+    });
+
+    test('all branches but one group', () {
+      const a = Audience(groups: ['driver']);
+      expect(a.includes(_u(UserRole.busDriver, dept: 'Civil')), isTrue);
+      expect(a.includes(_u(UserRole.student)), isFalse);
+    });
+
+    test('stored form round-trips', () {
+      const a = Audience(departments: ['MCA'], groups: ['student', 'teacher']);
+      final b = Audience.fromMap(a.toMap());
+      expect(b.departments, ['MCA']);
+      expect(b.groups, ['student', 'teacher']);
+      expect(a.describe(), 'MCA · Students, Teachers');
+      expect(Audience.everyone.describe(), 'All branches · everyone');
+    });
+  });
+
   group('demo backend', () {
+    test('notices and alerts reach only their audience', () async {
+      final admin = await _signedIn('admin@ecampus.demo');
+      await admin.addNotice(
+        Notice(
+          id: '',
+          title: 'MBA teachers only',
+          body: 'b',
+          authorName: 'a',
+          createdAt: DateTime.now(),
+          audience: const Audience(departments: ['MBA'], groups: ['teacher']),
+        ),
+      );
+      await admin.sendAlert(
+        'Bus drivers: report to office',
+        audience: const Audience(groups: ['driver']),
+      );
+      Future<List<String>> noticesFor(String email) async {
+        final b = await _signedIn(email);
+        final me = (await b.restoreSession())!;
+        return (await admin.watchNotices(me).first)
+            .map((n) => n.title)
+            .toList();
+      }
+
+      expect(
+        await noticesFor('iyer@ecampus.demo'),
+        contains('MBA teachers only'),
+      );
+      for (final e in [
+        'teacher@ecampus.demo',
+        'student@ecampus.demo',
+        'meena@ecampus.demo',
+        'library@ecampus.demo',
+        'driver@ecampus.demo',
+      ]) {
+        expect(
+          await noticesFor(e),
+          isNot(contains('MBA teachers only')),
+          reason: e,
+        );
+      }
+      // Admin and admin staff see everything.
+      expect(
+        await noticesFor('staff@ecampus.demo'),
+        contains('MBA teachers only'),
+      );
+      final driver = (await (await _signedIn('driver@ecampus.demo'))
+          .restoreSession())!;
+      final student = (await (await _signedIn('student@ecampus.demo'))
+          .restoreSession())!;
+      expect(await admin.watchActiveAlerts(driver).first, hasLength(1));
+      expect(await admin.watchActiveAlerts(student).first, isEmpty);
+    });
+
     test('an anonymous complaint hides the filer from the committee', () async {
       final student = await _signedIn('student@ecampus.demo');
       final id = await student.fileComplaint(
@@ -285,19 +425,23 @@ void main() {
 
     test('alerts can be sent and cleared', () async {
       final b = await _signedIn('admin@ecampus.demo');
-      expect(await b.watchActiveAlerts().first, isEmpty);
+      final admin = (await b.restoreSession())!;
+      expect(await b.watchActiveAlerts(admin).first, isEmpty);
       await b.sendAlert('Fire drill');
-      final active = await b.watchActiveAlerts().first;
+      final active = await b.watchActiveAlerts(admin).first;
       expect(active.single.message, 'Fire drill');
       await b.clearAlert(active.single.id);
-      expect(await b.watchActiveAlerts().first, isEmpty);
+      expect(await b.watchActiveAlerts(admin).first, isEmpty);
     });
 
     test('only public notices are offered before sign-in', () async {
-      final b = DemoBackend();
+      final b = await _signedIn('student@ecampus.demo');
       final pub = await b.watchPublicNotices().first;
       expect(pub.map((n) => n.id), ['no1']);
-      expect((await b.watchNotices().first).length, 2);
+      expect(
+        (await b.watchNotices((await b.restoreSession())!).first).length,
+        2,
+      );
     });
 
     test('attendance is corrected, not duplicated', () async {

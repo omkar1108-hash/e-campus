@@ -128,8 +128,8 @@ abstract class Backend {
   Future<void> endTrip(String busId);
 
   // ---- Notices ----------------------------------------------------------
-  /// College-wide notices, newest first (everybody except drivers).
-  Stream<List<Notice>> watchNotices();
+  /// Notices aimed at [viewer], newest first (admin and admin staff see all).
+  Stream<List<Notice>> watchNotices(AppUser viewer);
 
   /// Notices marked public: readable before sign-in (opening page).
   Stream<List<Notice>> watchPublicNotices();
@@ -137,9 +137,13 @@ abstract class Backend {
   Future<void> deleteNotice(String id);
 
   // ---- Emergency alerts ---------------------------------------------------
-  /// Alerts that have not been cleared, newest first. Everybody sees them.
-  Stream<List<EmergencyAlert>> watchActiveAlerts();
-  Future<void> sendAlert(String message);
+  /// Alerts that have not been cleared, newest first: those aimed at
+  /// [viewer] (the administrator sees all of them).
+  Stream<List<EmergencyAlert>> watchActiveAlerts(AppUser viewer);
+  Future<void> sendAlert(
+    String message, {
+    Audience audience = Audience.everyone,
+  });
   Future<void> clearAlert(String id);
 
   // ---- Timetable --------------------------------------------------------

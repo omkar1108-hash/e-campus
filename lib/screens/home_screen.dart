@@ -67,10 +67,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.read<AuthController>();
     _inbox = InboxController(context.read<Backend>(), auth.user!);
     _incomingSub = _inbox.incoming.listen(_showBanner);
-    _alertSub = context.read<Backend>().watchActiveAlerts().listen(
-      _onAlerts,
-      onError: (_) {},
-    );
+    _alertSub = context
+        .read<Backend>()
+        .watchActiveAlerts(auth.user!)
+        .listen(_onAlerts, onError: (_) {});
   }
 
   Future<Set<String>> _loadSeenAlerts() async {

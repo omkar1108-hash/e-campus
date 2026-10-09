@@ -13,13 +13,14 @@ service cloud.firestore {
     function role() { return profile().role; }
     function isAdmin() { return active() && role() == 'admin'; }
     function isAdminStaff() { return active() && role() == 'adminStaff'; }
-    function isTeacher() { return active() && role() == 'teacher'; }
+    function isTeacher() { return active() && role() in ['teacher', 'hod']; }
+    function isHod() { return active() && role() == 'hod'; }
     function notDriver() { return active() && role() != 'busDriver'; }
     function canPostNews() {
-      return active() && role() in ['classRep', 'teacher', 'adminStaff', 'admin'];
+      return active() && role() in ['classRep', 'teacher', 'hod', 'adminStaff', 'admin'];
     }
     function canManageBooks() {
-      return active() && role() in ['teacher', 'libraryStaff', 'adminStaff', 'admin'];
+      return active() && role() in ['teacher', 'hod', 'libraryStaff', 'adminStaff', 'admin'];
     }
 
     // ---- Users ---------------------------------------------------------
@@ -36,10 +37,10 @@ service cloud.firestore {
                     && (
                       (isAdmin() && request.resource.data.role in
                         ['admin', 'adminStaff', 'grievanceCommittee', 'libraryStaff',
-                         'teacher', 'student', 'busDriver'])
+                         'hod', 'teacher', 'student', 'busDriver'])
                       ||
                       (isAdminStaff() && request.resource.data.role in
-                        ['grievanceCommittee', 'libraryStaff', 'teacher',
+                        ['grievanceCommittee', 'libraryStaff', 'hod', 'teacher',
                          'student', 'busDriver'])
                     );
 
@@ -57,12 +58,12 @@ service cloud.firestore {
                .hasOnly(['name', 'department', 'role', 'gender', 'active'])
           && (request.resource.data.role == resource.data.role
               || request.resource.data.role in
-                   ['student', 'classRep', 'teacher', 'grievanceCommittee',
+                   ['student', 'classRep', 'teacher', 'hod', 'grievanceCommittee',
                     'libraryStaff', 'busDriver']))
         ||
-        // Teachers: only toggle student <-> class rep inside their own
-        // department. (The 2 girls + 2 boys limit is enforced by the app.)
-        (isTeacher() && resource.data.department == profile().department
+        // Head of department: only toggle student <-> class rep inside their
+        // own department. (The 2 girls + 2 boys limit is enforced by the app.)
+        (isHod() && resource.data.department == profile().department
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
           && ((resource.data.role == 'student' && request.resource.data.role == 'classRep')
               || (resource.data.role == 'classRep' && request.resource.data.role == 'student')));
@@ -104,7 +105,7 @@ service cloud.firestore {
                     && validBook(request.resource.data)
                     && request.resource.data.uploadedBy == request.auth.uid
                     && request.resource.data.get('rejectReason', '') == ''
-                    && ((role() == 'teacher'
+                    && ((role() in ['teacher', 'hod']
                          && request.resource.data.status == 'pending')
                         || (role() in ['libraryStaff', 'adminStaff', 'admin']
                             && request.resource.data.status == 'approved'));
@@ -127,7 +128,7 @@ service cloud.firestore {
          && validBook(request.resource.data))
         ||
         // A teacher fixes their own unapproved book; it goes back for review.
-        (role() == 'teacher'
+        (role() in ['teacher', 'hod']
          && resource.data.get('uploadedBy', '') == request.auth.uid
          && resource.data.get('status', '') in ['pending', 'rejected']
          && bookChanges().hasOnly(['title', 'author', 'category', 'url', 'isbn',
@@ -164,11 +165,35 @@ service cloud.firestore {
     // ---- Notices -------------------------------------------------------
     // College-wide. Admin and admin staff post and delete. A notice marked
     // public is also readable before sign-in (the opening page).
+    // Each notice lists who it is for in `targets` ("branch|group" pairs,
+    // "all" meaning every branch / everybody); a person reads it when one of
+    // their four target values appears there.
+    function myGroup() {
+      return role() in ['student', 'classRep'] ? 'student'
+           : role() in ['teacher', 'hod'] ? 'teacher'
+           : role() == 'busDriver' ? 'driver' : 'staff';
+    }
+    function myTargets() {
+      return ['all|all', 'all|' + myGroup(),
+              profile().department + '|all',
+              profile().department + '|' + myGroup()];
+    }
+    function validTargets(d) {
+      return d.targets is list && d.targets.size() > 0 && d.targets.size() <= 40
+          && d.departments is list && d.audience is list;
+    }
+
     match /notices/{id} {
-      allow read: if resource.data.get('public', false) == true || notDriver();
+      allow read: if resource.data.get('public', false) == true
+                  || (active() && (role() in ['admin', 'adminStaff']
+                      || resource.data.get('targets', []).hasAny(myTargets())));
       allow create: if (isAdmin() || isAdminStaff())
                     && request.resource.data.keys().hasOnly(
-                         ['title', 'body', 'authorName', 'createdAt', 'image', 'public'])
+                         ['title', 'body', 'authorName', 'createdAt', 'image', 'public',
+                          'departments', 'audience', 'targets'])
+                    && validTargets(request.resource.data)
+                    && (request.resource.data.public == false
+                        || request.resource.data.targets == ['all|all'])
                     && request.resource.data.title is string
                     && request.resource.data.title.size() > 0
                     && request.resource.data.title.size() <= 200
@@ -183,13 +208,17 @@ service cloud.firestore {
     }
 
     // ---- Emergency alerts ------------------------------------------------
-    // Only the administrator sends or clears an alert; every signed-in user,
-    // drivers included, can read it.
+    // Only the administrator sends or clears an alert. It reaches the branches
+    // and groups chosen (drivers included); the same `targets` idea as notices.
     match /alerts/{id} {
-      allow read: if active();
+      allow read: if active()
+                  && (role() == 'admin'
+                      || resource.data.targets.hasAny(myTargets()));
       allow create: if isAdmin()
                     && request.resource.data.keys().hasOnly(
-                         ['message', 'authorName', 'createdAt', 'active'])
+                         ['message', 'authorName', 'createdAt', 'active',
+                          'departments', 'audience', 'targets'])
+                    && validTargets(request.resource.data)
                     && request.resource.data.message is string
                     && request.resource.data.message.size() > 0
                     && request.resource.data.message.size() <= 300
@@ -215,7 +244,7 @@ service cloud.firestore {
     // ---- Assignments & notes ---------------------------------------------
     // Teachers post links; students read their own department's items.
     match /assignments/{id} {
-      allow read: if active() && role() in ['teacher', 'student', 'classRep']
+      allow read: if active() && role() in ['teacher', 'hod', 'student', 'classRep']
                   && (resource.data.get('createdBy', '') == request.auth.uid
                       || resource.data.get('department', '') == profile().department);
       allow create: if isTeacher()
@@ -275,18 +304,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/complaintIdentities/$(id)).data;
     }
     function isFiler(id) { return identityOf(id).filedBy == request.auth.uid; }
-    function complaintStatuses() { return ['submitted', 'inReview', 'resolved', 'rejected']; }
-    function validStatusChange() {
+    function canReadAllComplaints() {
+      return active() && role() in ['grievanceCommittee', 'adminStaff', 'admin'];
+    }
+    // Sent -> Working on it -> Resolved (committee) -> Closed (the person who
+    // filed it confirms) or back to Working on it (they say it is not fixed).
+    function committeeMove() {
       let from = resource.data.get('status', 'submitted');
       let to = request.resource.data.status;
       return (from == 'submitted' && to in ['inReview', 'resolved', 'rejected'])
           || (from == 'inReview' && to in ['resolved', 'rejected']);
     }
-    function statusOnlyChange() {
+    function filerMove() {
+      return resource.data.get('status', 'submitted') == 'resolved'
+          && request.resource.data.status in ['closed', 'inReview'];
+    }
+    function statusOnly() {
       return request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['status', 'updatedAt'])
-          && request.resource.data.updatedAt is number
-          && validStatusChange();
+          && request.resource.data.updatedAt is number;
     }
 
     match /complaintIdentities/{id} {
@@ -300,14 +336,17 @@ service cloud.firestore {
                     && request.resource.data.status == 'submitted'
                     && request.resource.data.anonymous is bool
                     && existsAfter(/databases/$(database)/documents/complaints/$(id));
-      // Only the status mirror changes, and only the committee changes it.
-      allow update: if isCommittee() && statusOnlyChange();
+      // Only the status mirror changes: the committee moves it forward, the
+      // person who filed it confirms or reopens a resolved complaint.
+      allow update: if active() && statusOnly()
+                    && ((isCommittee() && committeeMove())
+                        || (resource.data.filedBy == request.auth.uid && filerMove()));
       allow delete: if false;
     }
 
     match /complaints/{id} {
       allow read: if active()
-                  && (role() in ['grievanceCommittee', 'admin'] || isFiler(id));
+                  && (canReadAllComplaints() || isFiler(id));
       allow create: if active() && !isCommittee()
                     && request.resource.data.keys().hasOnly(
                          ['category', 'subject', 'description', 'anonymous',
@@ -331,12 +370,13 @@ service cloud.firestore {
                         : (request.resource.data.displayName == profile().name
                            && request.resource.data.displayDepartment
                                 == profile().department));
-      allow update: if isCommittee() && statusOnlyChange();
+      allow update: if active() && statusOnly()
+                    && ((isCommittee() && committeeMove())
+                        || (isFiler(id) && filerMove()));
       allow delete: if false;
 
       match /replies/{rid} {
-        allow read: if active()
-                    && (role() in ['grievanceCommittee', 'admin'] || isFiler(id));
+        allow read: if active() && (canReadAllComplaints() || isFiler(id));
         allow create: if active()
                       && request.resource.data.keys().hasOnly(
                            ['kind', 'byCommittee', 'authorName', 'text', 'createdAt'])
@@ -351,9 +391,9 @@ service cloud.firestore {
                         ||
                         (!isCommittee() && isFiler(id)
                          && request.resource.data.byCommittee == false
-                         && request.resource.data.kind == 'reply'
+                         && request.resource.data.kind in ['reply', 'status']
                          && get(/databases/$(database)/documents/complaints/$(id))
-                              .data.status in ['submitted', 'inReview'])
+                              .data.status in ['submitted', 'inReview', 'resolved'])
                       );
         allow update, delete: if false;
       }
@@ -401,9 +441,9 @@ service cloud.firestore {
       let me = profile();
       return other.get('active', true) == true && (
         (isStudentRole(me.role) && isStudentRole(other.role))
-        || (isStudentRole(me.role) && other.role == 'teacher'
+        || (isStudentRole(me.role) && other.role in ['teacher', 'hod']
             && other.department == me.department)
-        || (me.role == 'teacher' && isStudentRole(other.role)
+        || (me.role in ['teacher', 'hod'] && isStudentRole(other.role)
             && other.department == me.department)
         || (!isStudentRole(me.role) && !isStudentRole(other.role)));
     }
@@ -479,7 +519,7 @@ service cloud.firestore {
     // Configuration (name, plate, driver, departments) is written by admin /
     // admin staff; live trip fields only by the assigned driver.
     function canTrackAnyBus() {
-      return active() && role() in ['admin', 'adminStaff', 'teacher', 'libraryStaff',
+      return active() && role() in ['admin', 'adminStaff', 'teacher', 'hod', 'libraryStaff',
                                   'grievanceCommittee'];
     }
 

@@ -3,7 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/campus.dart';
+import '../services/auth_controller.dart';
 import '../services/backend.dart';
+import '../widgets/audience_picker.dart';
 import '../widgets/common.dart';
 
 /// Administrator: send an emergency alert to everybody using the app, and
@@ -18,6 +20,7 @@ class AlertScreen extends StatefulWidget {
 class _AlertScreenState extends State<AlertScreen> {
   final _message = TextEditingController();
   bool _busy = false;
+  Audience _audience = Audience.everyone;
 
   @override
   void dispose() {
@@ -34,7 +37,7 @@ class _AlertScreenState extends State<AlertScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Send emergency alert?'),
         content: Text(
-          'Everyone using the app will see this on screen:\n\n"$text"',
+          '${_audience.describe()} will see this on screen:\n\n"$text"',
         ),
         actions: [
           TextButton(
@@ -44,7 +47,7 @@ class _AlertScreenState extends State<AlertScreen> {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Send to everyone'),
+            child: const Text('Send alert now'),
           ),
         ],
       ),
@@ -52,7 +55,7 @@ class _AlertScreenState extends State<AlertScreen> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
-      await backend.sendAlert(text);
+      await backend.sendAlert(text, audience: _audience);
       _message.clear();
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -62,6 +65,7 @@ class _AlertScreenState extends State<AlertScreen> {
   @override
   Widget build(BuildContext context) {
     final backend = context.read<Backend>();
+    final admin = context.read<AuthController>().user!;
     final fmt = DateFormat('d MMM, h:mm a');
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -69,8 +73,9 @@ class _AlertScreenState extends State<AlertScreen> {
         Text('Emergency alert', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 4),
         const Text(
-          'Appears as a red banner for every signed-in user, drivers '
-          'included, until you clear it. It is shown inside the app only.',
+          'Appears as a red banner for the people you choose below (any '
+          'branch, any group, drivers included) until you clear it. It is '
+          'shown inside the app only.',
         ),
         const SizedBox(height: 12),
         TextField(
@@ -83,6 +88,11 @@ class _AlertScreenState extends State<AlertScreen> {
           ),
         ),
         const SizedBox(height: 8),
+        AudiencePicker(
+          value: _audience,
+          onChanged: (a) => setState(() => _audience = a),
+        ),
+        const SizedBox(height: 12),
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: Colors.red),
           onPressed: _busy ? null : _send,
@@ -92,7 +102,7 @@ class _AlertScreenState extends State<AlertScreen> {
         const SizedBox(height: 24),
         Text('Active alerts', style: Theme.of(context).textTheme.titleMedium),
         Live<List<EmergencyAlert>>(
-          stream: backend.watchActiveAlerts(),
+          stream: backend.watchActiveAlerts(admin),
           builder: (context, alerts) => alerts.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(16),
@@ -107,6 +117,7 @@ class _AlertScreenState extends State<AlertScreen> {
                           leading: const Icon(Icons.warning, color: Colors.red),
                           title: Text(a.message),
                           subtitle: Text(
+                            '${a.audience.describe()}\n'
                             '${a.authorName} · ${fmt.format(a.createdAt)}',
                           ),
                           trailing: TextButton(

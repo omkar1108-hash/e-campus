@@ -5,7 +5,7 @@ import '../models/app_user.dart';
 import '../services/backend.dart';
 import '../utils/class_rep_policy.dart';
 
-/// Teachers choose their department's class representatives:
+/// The head of department chooses their department's class representatives:
 /// at most two girls and two boys.
 class ClassRepsScreen extends StatelessWidget {
   const ClassRepsScreen({super.key, required this.user});

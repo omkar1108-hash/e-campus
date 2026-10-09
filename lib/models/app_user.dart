@@ -3,6 +3,7 @@ enum UserRole {
   student('Student'),
   classRep('Class Representative'),
   teacher('Teacher'),
+  hod('Head of Department'),
   libraryStaff('Library Staff'),
   busDriver('Bus Driver'),
   adminStaff('Admin Staff'),
@@ -11,6 +12,10 @@ enum UserRole {
 
   const UserRole(this.label);
   final String label;
+
+  /// Teachers and heads of department teach classes, mark attendance and
+  /// share assignments.
+  bool get isTeaching => this == teacher || this == hod;
 
   static UserRole fromName(String? name) => UserRole.values.firstWhere(
     (r) => r.name == name,

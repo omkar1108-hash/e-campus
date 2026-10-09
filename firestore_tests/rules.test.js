@@ -2,6 +2,7 @@
 // Needs Java (for the Firestore emulator) and Node 18+.
 const { test, before, after, beforeEach } = require('node:test');
 const fs = require('node:fs');
+const assert = require('node:assert/strict');
 const path = require('node:path');
 const {
   initializeTestEnvironment,
@@ -25,6 +26,8 @@ const USERS = {
   staff: user('adminStaff'),
   staff2: user('adminStaff'),
   teacher: user('teacher'),
+  hod: user('hod'),
+  hodMBA: user('hod', { department: 'MBA' }),
   teacherMBA: user('teacher', { department: 'MBA' }),
   library: user('libraryStaff'),
   committee: user('grievanceCommittee'),
@@ -88,13 +91,13 @@ test('signed-in active users can read profiles, others cannot', async () => {
 
 // ---- users: creating (admin-created accounts only) ---------------------------
 test('admin creates every role except class rep', async () => {
-  for (const role of ['admin', 'adminStaff', 'grievanceCommittee', 'libraryStaff', 'teacher', 'student', 'busDriver'])
+  for (const role of ['admin', 'adminStaff', 'grievanceCommittee', 'libraryStaff', 'hod', 'teacher', 'student', 'busDriver'])
     await assertSucceeds(setDoc(doc(as('admin'), 'users', `n-${role}`), newUser(role)));
   await assertFails(setDoc(doc(as('admin'), 'users', 'n-rep'), newUser('classRep')));
 });
 
 test('admin staff creates only library staff, teachers, students and drivers', async () => {
-  for (const role of ['grievanceCommittee', 'libraryStaff', 'teacher', 'student', 'busDriver'])
+  for (const role of ['grievanceCommittee', 'libraryStaff', 'hod', 'teacher', 'student', 'busDriver'])
     await assertSucceeds(setDoc(doc(as('staff'), 'users', `n-${role}`), newUser(role)));
   for (const role of ['admin', 'adminStaff', 'classRep'])
     await assertFails(setDoc(doc(as('staff'), 'users', `n-${role}`), newUser(role)));
@@ -144,11 +147,18 @@ test('admin staff cannot grant administrator or admin-staff roles', async () => 
   await assertSucceeds(updateDoc(doc(as('staff'), 'users', 'student'), { role: 'teacher' }));
 });
 
-test('teachers toggle class reps in their own department only', async () => {
-  await assertSucceeds(updateDoc(doc(as('teacher'), 'users', 'student'), { role: 'classRep' }));
-  await assertSucceeds(updateDoc(doc(as('teacher'), 'users', 'rep'), { role: 'student' }));
-  await assertFails(updateDoc(doc(as('teacher'), 'users', 'studentMBA'), { role: 'classRep' }));
-  await assertFails(updateDoc(doc(as('teacher'), 'users', 'repMBA'), { role: 'student' }));
+test('only the head of department toggles class reps, in their own department', async () => {
+  await assertSucceeds(updateDoc(doc(as('hod'), 'users', 'student'), { role: 'classRep' }));
+  await assertSucceeds(updateDoc(doc(as('hod'), 'users', 'rep'), { role: 'student' }));
+  await assertFails(updateDoc(doc(as('hod'), 'users', 'studentMBA'), { role: 'classRep' }));
+  await assertFails(updateDoc(doc(as('hod'), 'users', 'repMBA'), { role: 'student' }));
+  // A plain teacher can no longer do it.
+  await assertFails(updateDoc(doc(as('teacher'), 'users', 'student'), { role: 'classRep' }));
+  await assertFails(updateDoc(doc(as('teacher'), 'users', 'rep'), { role: 'student' }));
+  // The head of department can do nothing else to profiles.
+  await assertFails(updateDoc(doc(as('hod'), 'users', 'student'), { role: 'teacher' }));
+  await assertFails(updateDoc(doc(as('hod'), 'users', 'student'), { name: 'x' }));
+  await assertFails(updateDoc(doc(as('hod'), 'users', 'student'), { active: false }));
 });
 
 test('teachers cannot do anything else to profiles', async () => {
@@ -570,23 +580,68 @@ test('the old single "bus" collection is no longer accessible', async () => {
 // ===========================================================================
 // Campus features
 // ===========================================================================
-const NOTICE = { title: 'Holiday', body: 'Closed', authorName: 'A', createdAt: 1, public: false };
+const NOTICE = {
+  title: 'Holiday', body: 'Closed', authorName: 'A', createdAt: 1, public: false,
+  departments: [], audience: [], targets: ['all|all'],
+};
+const aimed = (departments, audience) => ({
+  departments, audience,
+  targets: (departments.length ? departments : ['all']).flatMap((d) =>
+    (audience.length ? audience : ['all']).map((g) => `${d}|${g}`)),
+});
+// The four values that match a person (what the app queries with).
+const mine = (dept, group) => ['all|all', `all|${group}`, `${dept}|all`, `${dept}|${group}`];
+const noticesFor = (uid, dept, group) =>
+  getDocs(query(collection(as(uid), 'notices'), where('targets', 'array-contains-any', mine(dept, group))));
 
 test('notices: admin and admin staff post and delete, others only read', async () => {
   for (const uid of ['admin', 'staff'])
     await assertSucceeds(addDoc(collection(as(uid), 'notices'), NOTICE));
-  for (const uid of ['teacher', 'student', 'rep', 'library', 'committee', 'driver'])
+  for (const uid of ['teacher', 'hod', 'student', 'rep', 'library', 'committee', 'driver'])
     await assertFails(addDoc(collection(as(uid), 'notices'), NOTICE));
   await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, extra: 1 }));
   await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, title: '' }));
+  await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, targets: [] }));
+  const { targets, ...noTargets } = NOTICE;
+  await assertFails(addDoc(collection(as('admin'), 'notices'), noTargets));
   await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, image: 'x'.repeat(700001) }));
   await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'notices', 'n1'), NOTICE));
-  for (const uid of ['teacher', 'student', 'library', 'committee'])
+  for (const uid of ['teacher', 'student', 'library', 'committee', 'driver'])
     await assertSucceeds(getDoc(doc(as(uid), 'notices', 'n1')));
-  await assertFails(getDoc(doc(as('driver'), 'notices', 'n1')));
   await assertFails(getDoc(doc(anon(), 'notices', 'n1')));
   await assertFails(deleteDoc(doc(as('teacher'), 'notices', 'n1')));
   await assertSucceeds(deleteDoc(doc(as('staff'), 'notices', 'n1')));
+});
+
+test('notices: reach only the chosen branches and groups', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, 'notices', 'all'), NOTICE);
+    await setDoc(doc(db, 'notices', 'mcaStudents'), { ...NOTICE, ...aimed(['MCA'], ['student']) });
+    await setDoc(doc(db, 'notices', 'mbaTeachers'), { ...NOTICE, ...aimed(['MBA'], ['teacher']) });
+    await setDoc(doc(db, 'notices', 'allDrivers'), { ...NOTICE, ...aimed([], ['driver']) });
+    await setDoc(doc(db, 'notices', 'mcaEveryone'), { ...NOTICE, ...aimed(['MCA'], []) });
+    await setDoc(doc(db, 'notices', 'staffAndStudents'), { ...NOTICE, ...aimed([], ['staff', 'student']) });
+  });
+  const ids = async (p) => (await p).docs.map((d) => d.id).sort();
+  assert.deepEqual(await ids(noticesFor('student', 'MCA', 'student')), ['all', 'mcaEveryone', 'mcaStudents', 'staffAndStudents']);
+  assert.deepEqual(await ids(noticesFor('rep', 'MCA', 'student')), ['all', 'mcaEveryone', 'mcaStudents', 'staffAndStudents']);
+  assert.deepEqual(await ids(noticesFor('studentMBA', 'MBA', 'student')), ['all', 'staffAndStudents']);
+  assert.deepEqual(await ids(noticesFor('teacher', 'MCA', 'teacher')), ['all', 'mcaEveryone']);
+  assert.deepEqual(await ids(noticesFor('hodMBA', 'MBA', 'teacher')), ['all', 'mbaTeachers']);
+  assert.deepEqual(await ids(noticesFor('driver', 'MCA', 'driver')), ['all', 'allDrivers', 'mcaEveryone']);
+  assert.deepEqual(await ids(noticesFor('library', 'MCA', 'staff')), ['all', 'mcaEveryone', 'staffAndStudents']);
+  // Reading a notice that is not aimed at you is refused, query or not.
+  await assertFails(getDoc(doc(as('studentMBA'), 'notices', 'mcaStudents')));
+  await assertFails(getDoc(doc(as('teacher'), 'notices', 'mcaStudents')));
+  await assertFails(getDoc(doc(as('driver'), 'notices', 'mcaStudents')));
+  await assertFails(getDoc(doc(as('student'), 'notices', 'allDrivers')));
+  // A query that claims someone else's targets cannot read their notices.
+  await assertFails(noticesFor('studentMBA', 'MCA', 'student'));
+  await assertFails(getDocs(collection(as('student'), 'notices')));
+  // Admin side reads everything.
+  assert.equal((await getDocs(collection(as('admin'), 'notices'))).size, 6);
+  assert.equal((await getDocs(collection(as('staff'), 'notices'))).size, 6);
 });
 
 test('notices: only public ones are readable before sign-in', async () => {
@@ -598,26 +653,53 @@ test('notices: only public ones are readable before sign-in', async () => {
   await assertSucceeds(getDocs(query(collection(anon(), 'notices'), where('public', '==', true))));
   await assertFails(getDoc(doc(anon(), 'notices', 'priv')));
   await assertFails(getDocs(collection(anon(), 'notices')));
-  await assertSucceeds(getDocs(collection(as('student'), 'notices')));
+  // A public notice must be for everybody.
+  await assertSucceeds(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, public: true }));
+  await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, ...aimed(['MCA'], []), public: true }));
+  await assertFails(addDoc(collection(as('admin'), 'notices'), { ...NOTICE, ...aimed([], ['student']), public: true }));
 });
 
-const ALERT = { message: 'Fire drill now', authorName: 'A', createdAt: 1, active: true };
+const ALERT = {
+  message: 'Fire drill now', authorName: 'A', createdAt: 1, active: true,
+  departments: [], audience: [], targets: ['all|all'],
+};
+const alertsFor = (uid, dept, group) =>
+  getDocs(query(collection(as(uid), 'alerts'), where('targets', 'array-contains-any', mine(dept, group))));
 
-test('alerts: only admin sends and clears; every active user reads', async () => {
+test('alerts: only admin sends and clears', async () => {
   await assertSucceeds(addDoc(collection(as('admin'), 'alerts'), ALERT));
-  for (const uid of ['staff', 'teacher', 'student', 'driver', 'committee'])
+  await assertSucceeds(addDoc(collection(as('admin'), 'alerts'), { ...ALERT, ...aimed(['MCA'], ['student']) }));
+  for (const uid of ['staff', 'teacher', 'hod', 'student', 'rep', 'driver', 'committee'])
     await assertFails(addDoc(collection(as(uid), 'alerts'), ALERT));
   await assertFails(addDoc(collection(as('admin'), 'alerts'), { ...ALERT, message: 'x'.repeat(301) }));
   await assertFails(addDoc(collection(as('admin'), 'alerts'), { ...ALERT, active: false }));
+  await assertFails(addDoc(collection(as('admin'), 'alerts'), { ...ALERT, targets: [] }));
   await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'alerts', 'a1'), ALERT));
-  for (const uid of ['student', 'driver', 'library', 'committee'])
-    await assertSucceeds(getDocs(query(collection(as(uid), 'alerts'), where('active', '==', true))));
   await assertFails(getDocs(collection(anon(), 'alerts')));
   await assertFails(getDocs(collection(as('disabledAdmin'), 'alerts')));
   await assertFails(updateDoc(doc(as('staff'), 'alerts', 'a1'), { active: false }));
   await assertFails(updateDoc(doc(as('admin'), 'alerts', 'a1'), { message: 'changed' }));
   await assertSucceeds(updateDoc(doc(as('admin'), 'alerts', 'a1'), { active: false, clearedAt: 5 }));
   await assertFails(deleteDoc(doc(as('admin'), 'alerts', 'a1')));
+});
+
+test('alerts: reach only the chosen branches and groups', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, 'alerts', 'all'), ALERT);
+    await setDoc(doc(db, 'alerts', 'mcaStudents'), { ...ALERT, ...aimed(['MCA'], ['student']) });
+    await setDoc(doc(db, 'alerts', 'drivers'), { ...ALERT, ...aimed([], ['driver']) });
+  });
+  const ids = async (p) => (await p).docs.map((d) => d.id).sort();
+  assert.deepEqual(await ids(alertsFor('student', 'MCA', 'student')), ['all', 'mcaStudents']);
+  assert.deepEqual(await ids(alertsFor('studentMBA', 'MBA', 'student')), ['all']);
+  assert.deepEqual(await ids(alertsFor('driver', 'MCA', 'driver')), ['all', 'drivers']);
+  assert.deepEqual(await ids(alertsFor('teacher', 'MCA', 'teacher')), ['all']);
+  await assertFails(getDoc(doc(as('driver'), 'alerts', 'mcaStudents')));
+  await assertFails(getDoc(doc(as('studentMBA'), 'alerts', 'mcaStudents')));
+  await assertFails(alertsFor('studentMBA', 'MCA', 'student'));
+  assert.equal((await getDocs(collection(as('admin'), 'alerts'))).size, 3);
+  await assertFails(getDocs(collection(as('staff'), 'alerts')));
 });
 
 const SLOT = { day: 'Mon', start: '09:00', end: '10:00', subject: 'S', teacherUid: 'teacher', teacherName: 'T', room: 'R' };
@@ -758,40 +840,50 @@ test('complaints: the committee cannot read who filed an anonymous complaint', a
   await assertFails(getDocs(collection(as('committee'), 'complaintIdentities')));
   await assertSucceeds(getDoc(doc(as('admin'), 'complaintIdentities', 'c1')));
   await assertSucceeds(getDocs(collection(as('admin'), 'complaints')));
+  // Admin staff read complaints, but not who filed an anonymous one.
+  await assertSucceeds(getDocs(collection(as('staff'), 'complaints')));
+  await assertSucceeds(getDoc(doc(as('staff'), 'complaints', 'c1')));
+  await assertFails(getDoc(doc(as('staff'), 'complaintIdentities', 'c1')));
+  await assertFails(getDocs(collection(as('staff'), 'complaintIdentities')));
   // The filer reads their own, others cannot.
   await assertSucceeds(getDoc(doc(as('student'), 'complaintIdentities', 'c1')));
   await assertSucceeds(getDoc(doc(as('student'), 'complaints', 'c1')));
   await assertSucceeds(getDocs(query(collection(as('student'), 'complaintIdentities'), where('filedBy', '==', 'student'))));
-  for (const uid of ['rep', 'teacher', 'staff', 'library', 'driver']) {
+  for (const uid of ['rep', 'teacher', 'hod', 'library', 'driver']) {
     await assertFails(getDoc(doc(as(uid), 'complaints', 'c1')));
     await assertFails(getDoc(doc(as(uid), 'complaintIdentities', 'c1')));
   }
-  await assertFails(getDocs(collection(as('staff'), 'complaints')));
+  await assertFails(getDocs(collection(as('library'), 'complaints')));
   await assertFails(getDocs(query(collection(as('rep'), 'complaintIdentities'), where('filedBy', '==', 'student'))));
   await assertFails(getDoc(doc(anon(), 'complaints', 'c1')));
 });
 
-test('complaints: only the committee changes status, and only along the flow', async () => {
-  const flip = (uid, id, status) => {
-    const db = as(uid);
-    const b = writeBatch(db);
-    b.update(doc(db, 'complaints', id), { status, updatedAt: 9 });
-    b.update(doc(db, 'complaintIdentities', id), { status, updatedAt: 9 });
-    return b.commit();
-  };
+const flip = (uid, id, status) => {
+  const db = as(uid);
+  const b = writeBatch(db);
+  b.update(doc(db, 'complaints', id), { status, updatedAt: 9 });
+  b.update(doc(db, 'complaintIdentities', id), { status, updatedAt: 9 });
+  return b.commit();
+};
+
+test('complaints: the committee moves it forward, along the flow only', async () => {
   await seedComplaint('c1');
   for (const uid of ['student', 'admin', 'staff', 'teacher', 'driver'])
     await assertFails(flip(uid, 'c1', 'inReview'));
   await assertFails(flip('committee', 'c1', 'submitted'));
   await assertFails(flip('committee', 'c1', 'bogus'));
+  await assertFails(flip('committee', 'c1', 'closed'));
   await assertSucceeds(flip('committee', 'c1', 'inReview'));
   await assertFails(flip('committee', 'c1', 'submitted'));
+  await assertFails(flip('committee', 'c1', 'closed'));
   await assertSucceeds(flip('committee2', 'c1', 'resolved'));
-  // Final states are locked.
+  // Once resolved, the committee has to wait for the complainant.
   await assertFails(flip('committee', 'c1', 'inReview'));
   await assertFails(flip('committee', 'c1', 'rejected'));
+  await assertFails(flip('committee', 'c1', 'closed'));
   await seedComplaint('c2');
   await assertSucceeds(flip('committee', 'c2', 'rejected'));
+  await assertFails(flip('committee', 'c2', 'inReview'));
   // Nothing but status may change.
   await seedComplaint('c3');
   await assertFails(updateDoc(doc(as('committee'), 'complaints', 'c3'), { status: 'inReview', updatedAt: 9, subject: 'edited' }));
@@ -799,6 +891,31 @@ test('complaints: only the committee changes status, and only along the flow', a
   await assertFails(updateDoc(doc(as('student'), 'complaints', 'c3'), { subject: 'edited' }));
   await assertFails(deleteDoc(doc(as('committee'), 'complaints', 'c3')));
   await assertFails(deleteDoc(doc(as('admin'), 'complaintIdentities', 'c3')));
+});
+
+test('complaints: the complainant confirms a fix or sends it back', async () => {
+  await seedComplaint('c1', 'student', 'resolved');
+  // Only the person who filed it, and only from "resolved".
+  for (const uid of ['rep', 'teacher', 'admin', 'staff', 'committee'])
+    await assertFails(flip(uid, 'c1', 'closed'));
+  await assertFails(flip('student', 'c1', 'rejected'));
+  await assertFails(flip('student', 'c1', 'resolved'));
+  await assertSucceeds(flip('student', 'c1', 'inReview'));
+  // Back with the committee; the complainant cannot resolve it themselves.
+  await assertFails(flip('student', 'c1', 'resolved'));
+  await assertFails(flip('student', 'c1', 'closed'));
+  await assertSucceeds(flip('committee', 'c1', 'resolved'));
+  await assertSucceeds(flip('student', 'c1', 'closed'));
+  // Closed is final for everybody.
+  for (const uid of ['student', 'committee', 'admin'])
+    for (const st of ['inReview', 'resolved', 'closed', 'rejected'])
+      await assertFails(flip(uid, 'c1', st));
+  // Not allowed on a complaint that is not yours, or not yet resolved.
+  await seedComplaint('c2', 'student', 'inReview');
+  await assertFails(flip('student', 'c2', 'closed'));
+  await seedComplaint('c3', 'teacher', 'resolved');
+  await assertFails(flip('student', 'c3', 'closed'));
+  await assertSucceeds(flip('teacher', 'c3', 'closed'));
 });
 
 test('complaint replies: committee and filer talk, nobody else', async () => {
@@ -810,9 +927,10 @@ test('complaint replies: committee and filer talk, nobody else', async () => {
   await assertSucceeds(reply('committee', { byCommittee: true, authorName: 'C' }));
   await assertSucceeds(reply('committee', { byCommittee: true, kind: 'status' }));
   await assertSucceeds(reply('student'));
-  // Filer cannot pose as the committee or write status notes.
+  // The filer may note a status change, but cannot pose as the committee.
+  await assertSucceeds(reply('student', { kind: 'status' }));
   await assertFails(reply('student', { byCommittee: true }));
-  await assertFails(reply('student', { kind: 'status' }));
+  await assertFails(reply('student', { kind: 'bogus' }));
   await assertFails(reply('committee', { byCommittee: false }));
   // Others cannot take part.
   for (const uid of ['rep', 'teacher', 'staff', 'admin', 'driver'])
@@ -821,21 +939,27 @@ test('complaint replies: committee and filer talk, nobody else', async () => {
   await assertFails(reply('student', { text: 'x'.repeat(2001) }));
   await assertFails(reply('student', { extra: 1 }));
   const list = (uid) => getDocs(collection(as(uid), 'complaints', 'c1', 'replies'));
-  for (const uid of ['committee', 'admin', 'student']) await assertSucceeds(list(uid));
-  for (const uid of ['rep', 'teacher', 'staff']) await assertFails(list(uid));
+  for (const uid of ['committee', 'admin', 'staff', 'student']) await assertSucceeds(list(uid));
+  for (const uid of ['rep', 'teacher', 'library']) await assertFails(list(uid));
   // Replies are immutable.
   const first = (await getDocs(collection(as('committee'), 'complaints', 'c1', 'replies'))).docs[0];
   await assertFails(updateDoc(first.ref, { text: 'edited' }));
   await assertFails(deleteDoc(first.ref));
 });
 
-test('complaint replies: the filer cannot reply once the complaint is closed', async () => {
-  await seedComplaint('c1', 'student', 'resolved');
-  const add = (uid, extra = {}) => addDoc(collection(as(uid), 'complaints', 'c1', 'replies'), {
+test('complaint replies: the filer may reply until it is closed or rejected', async () => {
+  const add = (uid, id, extra = {}) => addDoc(collection(as(uid), 'complaints', id, 'replies'), {
     kind: 'reply', byCommittee: false, authorName: 'Complainant', text: 'hi', createdAt: 1, ...extra,
   });
-  await assertFails(add('student'));
-  await assertSucceeds(add('committee', { byCommittee: true }));
+  await seedComplaint('open', 'student', 'inReview');
+  await seedComplaint('waiting', 'student', 'resolved');
+  await seedComplaint('closed', 'student', 'closed');
+  await seedComplaint('rejected', 'student', 'rejected');
+  await assertSucceeds(add('student', 'open'));
+  await assertSucceeds(add('student', 'waiting'));
+  await assertFails(add('student', 'closed'));
+  await assertFails(add('student', 'rejected'));
+  await assertSucceeds(add('committee', 'closed', { byCommittee: true }));
 });
 
 // ---- activity log -----------------------------------------------------------

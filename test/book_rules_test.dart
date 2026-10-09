@@ -34,6 +34,7 @@ void main() {
           Rbac.canManageBooks(_u('x', r)),
           {
             UserRole.teacher,
+            UserRole.hod,
             UserRole.libraryStaff,
             UserRole.adminStaff,
             UserRole.admin,
@@ -70,6 +71,7 @@ void main() {
           Rbac.canSeeUnapprovedBooks(_u('x', r)),
           {
             UserRole.teacher,
+            UserRole.hod,
             UserRole.libraryStaff,
             UserRole.adminStaff,
             UserRole.admin,

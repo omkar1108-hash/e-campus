@@ -19,10 +19,10 @@ class ChatPolicy {
     final meStudent = _isStudent(me.role);
     final otherStudent = _isStudent(other.role);
     if (meStudent && otherStudent) return true;
-    if (meStudent && other.role == UserRole.teacher) {
+    if (meStudent && other.role.isTeaching) {
       return me.department == other.department;
     }
-    if (me.role == UserRole.teacher && otherStudent) {
+    if (me.role.isTeaching && otherStudent) {
       return me.department == other.department;
     }
     return !meStudent && !otherStudent;

@@ -29,7 +29,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   Future<void> _add(Map<String, List<TimetableSlot>> all) async {
     final backend = context.read<Backend>();
     final teachers = (await backend.watchUsers().first)
-        .where((u) => u.role == UserRole.teacher && u.active)
+        .where((u) => u.role.isTeaching && u.active)
         .toList();
     if (!mounted) return;
     final slot = await showDialog<TimetableSlot>(
@@ -82,7 +82,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.all(8),
                   children: [
-                    if (_me.role == UserRole.teacher)
+                    if (_me.role.isTeaching)
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(

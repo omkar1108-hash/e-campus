@@ -57,13 +57,13 @@ class DashboardScreen extends StatelessWidget {
         _StatCard<List<Notice>>(
           icon: Icons.campaign,
           title: 'Notices',
-          stream: () => backend.watchNotices(),
+          stream: () => backend.watchNotices(u),
           map: (l) => l.isEmpty
               ? ('None', 'No notices yet')
               : ('${l.length}', 'Latest: ${l.first.title}'),
           onTap: () => onOpen('Notices'),
         ),
-      if (Rbac.isStudent(u) || u.role == UserRole.teacher)
+      if (Rbac.isStudent(u) || u.role.isTeaching)
         _StatCard<List<TimetableSlot>>(
           icon: Icons.schedule,
           title: "Today's classes",
@@ -117,7 +117,7 @@ class DashboardScreen extends StatelessWidget {
           },
           onTap: () => onOpen('Assignments'),
         ),
-      if (u.role == UserRole.teacher)
+      if (u.role.isTeaching)
         _StatCard<List<AttendanceRecord>>(
           icon: Icons.fact_check,
           title: 'Attendance marked',
@@ -135,7 +135,7 @@ class DashboardScreen extends StatelessWidget {
           icon: Icons.local_library,
           title: Rbac.canVerifyBooks(u)
               ? 'Books to verify'
-              : u.role == UserRole.teacher
+              : u.role.isTeaching
               ? 'My books'
               : 'E-Library',
           stream: () => backend.watchBooks(u),
@@ -147,7 +147,7 @@ class DashboardScreen extends StatelessWidget {
                 n == 0 ? 'Nothing waiting' : 'waiting for approval',
               );
             }
-            if (u.role == UserRole.teacher) {
+            if (u.role.isTeaching) {
               final mine = l.where((b) => b.uploadedBy == u.uid).toList();
               final pending = mine
                   .where((b) => b.status == BookStatus.pending)
@@ -203,7 +203,7 @@ class DashboardScreen extends StatelessWidget {
           ),
           onTap: () => onOpen('Manage Users'),
         ),
-      if (u.role == UserRole.teacher)
+      if (Rbac.canAssignClassReps(u))
         _StatCard<List<AppUser>>(
           icon: Icons.how_to_reg,
           title: 'Class representatives',
