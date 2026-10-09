@@ -91,10 +91,39 @@ service cloud.firestore {
                     && request.resource.data.senderId == request.auth.uid;
     }
 
-    // ---- Bus -----------------------------------------------------------
-    match /bus/{doc} {
-      allow read: if active();
-      allow write: if active() && role() == 'busDriver';
+    // ---- Buses ---------------------------------------------------------
+    // Configuration (name, plate, driver, departments) is written by admin /
+    // admin staff; live trip fields only by the assigned driver.
+    function canTrackAnyBus() {
+      return active() && role() in ['admin', 'adminStaff', 'teacher', 'libraryStaff'];
+    }
+
+    match /buses/{id} {
+      allow read: if canTrackAnyBus()
+                  || (active() && role() in ['student', 'classRep']
+                      && profile().department in resource.data.departments)
+                  || (active() && role() == 'busDriver'
+                      && resource.data.driverUid == request.auth.uid);
+
+      allow create: if (isAdmin() || isAdminStaff())
+                    && request.resource.data.keys().hasOnly(
+                         ['name', 'plate', 'driverUid', 'departments', 'active'])
+                    && request.resource.data.active == false
+                    && request.resource.data.name is string
+                    && request.resource.data.departments is list;
+
+      allow update:
+        // Administration edits the configuration only.
+        if ((isAdmin() || isAdminStaff())
+             && request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['name', 'plate', 'driverUid', 'departments']))
+        // The assigned driver controls the trip only.
+        || (active() && role() == 'busDriver'
+             && resource.data.driverUid == request.auth.uid
+             && request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['active', 'lat', 'lng', 'updatedAt', 'tripStartedAt']));
+
+      allow delete: if isAdmin() || isAdminStaff();
     }
   }
 }

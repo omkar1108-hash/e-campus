@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/app_user.dart';
 import '../services/auth_controller.dart';
+import '../services/trip_controller.dart';
 import '../utils/rbac.dart';
 import 'bus_screen.dart';
 import 'chatbot_screen.dart';
@@ -11,6 +12,7 @@ import 'library_screen.dart';
 import 'news_screen.dart';
 import 'people_screen.dart';
 import 'class_reps_screen.dart';
+import 'manage_buses_screen.dart';
 import 'manage_users_screen.dart';
 
 class _Destination {
@@ -77,6 +79,12 @@ class _HomeScreenState extends State<HomeScreen> {
       Rbac.canAssignClassReps,
     ),
     _Destination(
+      'Manage Buses',
+      Icons.directions_bus_filled,
+      (u) => ManageBusesScreen(user: u),
+      Rbac.canManageBuses,
+    ),
+    _Destination(
       'Manage Users',
       Icons.admin_panel_settings,
       (u) => ManageUsersScreen(user: u),
@@ -129,9 +137,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Sign out'),
-              onTap: () {
+              onTap: () async {
+                final trips = context.read<TripController>();
                 Navigator.of(context).pop();
-                auth.signOut();
+                // Never leave a bus trip running after the driver signs out.
+                await trips.stopIfRunning();
+                await auth.signOut();
               },
             ),
           ],

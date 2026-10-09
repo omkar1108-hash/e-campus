@@ -14,7 +14,8 @@ class DashboardScreen extends StatelessWidget {
     final abilities = <(IconData, String)>[
       if (Rbac.canUseLibrary(user))
         (Icons.local_library, 'Read and download books from the e-library'),
-      (Icons.directions_bus, 'Track the college bus in real time'),
+      if (!Rbac.canShareBusLocation(user))
+        (Icons.directions_bus, 'Track your college bus in real time'),
       (Icons.chat, 'Chat with teachers and friends'),
       if (Rbac.canUseChatbot(user))
         (Icons.smart_toy, 'Clear doubts with the AI chatbot'),
@@ -25,7 +26,15 @@ class DashboardScreen extends StatelessWidget {
       if (Rbac.canManageBooks(user))
         (Icons.library_add, 'Add and remove e-library books'),
       if (Rbac.canShareBusLocation(user))
-        (Icons.share_location, 'Publish the live bus location'),
+        (
+          Icons.share_location,
+          'Start and end bus trips and share the live location',
+        ),
+      if (Rbac.canManageBuses(user))
+        (
+          Icons.directions_bus_filled,
+          'Add buses, assign drivers and departments',
+        ),
       if (Rbac.canAssignClassReps(user))
         (Icons.how_to_reg, 'Choose class representatives (2 girls, 2 boys)'),
       if (Rbac.canManageUsers(user))
