@@ -53,9 +53,24 @@ abstract class Backend {
   Future<void> setUserRole(String uid, UserRole role);
 
   // ---- E-Library --------------------------------------------------------
-  Stream<List<Book>> watchBooks();
+  /// Books [viewer] may see: approved ones for everybody, plus the viewer's
+  /// own unapproved books (teachers), or every book (library staff, admin
+  /// staff, admin).
+  Stream<List<Book>> watchBooks(AppUser viewer);
+
+  /// The caller sets uploader and status (see `Rbac.initialBookStatus`).
   Future<void> addBook(Book book);
+
+  /// Edits a book. With [resubmit] the book goes back to "waiting for
+  /// verification" and any rejection reason is cleared.
+  Future<void> updateBook(Book book, {bool resubmit = false});
+
+  /// Library staff: approve, or reject with a [reason].
+  Future<void> reviewBook(String id, {required bool approve, String reason});
   Future<void> deleteBook(String id);
+
+  /// Marks books added before approvals existed as approved. Returns how many.
+  Future<int> approveLegacyBooks();
 
   // ---- Tech news --------------------------------------------------------
   Stream<List<NewsItem>> watchNews(String department);

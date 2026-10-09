@@ -1,4 +1,5 @@
 import '../models/app_user.dart';
+import '../models/book.dart';
 
 /// Central place for Role-Based Access Control decisions.
 ///
@@ -34,12 +35,38 @@ class Rbac {
   }
 
   // ---- Library ----------------------------------------------------------
+  /// Who may add books. Teachers' books wait for library staff to verify.
   static bool canManageBooks(AppUser u) => _is(u, {
     UserRole.teacher,
     UserRole.libraryStaff,
     UserRole.adminStaff,
     UserRole.admin,
   });
+
+  /// Library staff, admin staff and admin: no approval needed, and they can
+  /// see, edit and delete every book.
+  static bool seesAllBooks(AppUser u) =>
+      _is(u, {UserRole.libraryStaff, UserRole.adminStaff, UserRole.admin});
+
+  static BookStatus initialBookStatus(AppUser u) =>
+      u.role == UserRole.teacher ? BookStatus.pending : BookStatus.approved;
+
+  /// Only library staff approve or reject teachers' books.
+  static bool canVerifyBooks(AppUser u) => u.role == UserRole.libraryStaff;
+
+  /// Teachers see their own unapproved books; staff see all of them.
+  static bool canSeeUnapprovedBooks(AppUser u) =>
+      u.role == UserRole.teacher || seesAllBooks(u);
+
+  /// The uploader, library staff, admin staff and admin may delete a book.
+  static bool canDeleteBook(AppUser u, Book b) =>
+      seesAllBooks(u) || (b.uploadedBy.isNotEmpty && b.uploadedBy == u.uid);
+
+  /// Staff edit any book. An uploader may fix their own book until it is
+  /// approved (editing sends it back for verification).
+  static bool canEditBook(AppUser u, Book b) =>
+      seesAllBooks(u) ||
+      (b.uploadedBy == u.uid && b.status != BookStatus.approved);
 
   // ---- Bus --------------------------------------------------------------
   /// Only drivers start and end trips (and so publish the location).

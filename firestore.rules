@@ -70,16 +70,91 @@ service cloud.firestore {
     }
 
     // ---- E-library -----------------------------------------------------
+    // Teachers' books start as "pending" and are approved or rejected by
+    // library staff. Everybody except drivers reads approved books; a teacher
+    // also sees their own; library staff, admin staff and admin see all.
+    function bookStaff() {
+      return active() && role() in ['libraryStaff', 'adminStaff', 'admin'];
+    }
+    function validBook(d) {
+      return d.title is string && d.title.size() > 0 && d.title.size() <= 200
+          && d.author is string && d.author.size() <= 200
+          && d.category is string && d.category.size() <= 100
+          && d.url is string && d.url.size() <= 2000
+          && d.get('isbn', '') is string && d.get('isbn', '').size() <= 20
+          && (!('cover' in d) || (d.cover is string && d.cover.size() <= 700000));
+    }
+    function bookChanges() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
     match /books/{id} {
-      allow read: if notDriver();
-      allow write: if canManageBooks();
+      allow read: if notDriver()
+                  && (role() in ['libraryStaff', 'adminStaff', 'admin']
+                      || resource.data.get('status', '') == 'approved'
+                      || resource.data.get('uploadedBy', '') == request.auth.uid);
+
+      allow create: if canManageBooks()
+                    && request.resource.data.keys().hasOnly(
+                         ['title', 'author', 'category', 'url', 'isbn', 'cover',
+                          'status', 'uploadedBy', 'uploadedByName', 'rejectReason',
+                          'createdAt'])
+                    && validBook(request.resource.data)
+                    && request.resource.data.uploadedBy == request.auth.uid
+                    && request.resource.data.get('rejectReason', '') == ''
+                    && ((role() == 'teacher'
+                         && request.resource.data.status == 'pending')
+                        || (role() in ['libraryStaff', 'adminStaff', 'admin']
+                            && request.resource.data.status == 'approved'));
+
+      allow update: if active() && (
+        // Library staff verify a pending book.
+        (role() == 'libraryStaff'
+         && resource.data.get('status', '') == 'pending'
+         && bookChanges().hasOnly(['status', 'rejectReason'])
+         && ((request.resource.data.status == 'approved'
+              && request.resource.data.get('rejectReason', '') == '')
+             || (request.resource.data.status == 'rejected'
+                 && request.resource.data.rejectReason is string
+                 && request.resource.data.rejectReason.size() > 0
+                 && request.resource.data.rejectReason.size() <= 200)))
+        ||
+        // Library staff, admin staff and admin edit any book's content.
+        (bookStaff()
+         && bookChanges().hasOnly(['title', 'author', 'category', 'url', 'isbn', 'cover'])
+         && validBook(request.resource.data))
+        ||
+        // A teacher fixes their own unapproved book; it goes back for review.
+        (role() == 'teacher'
+         && resource.data.get('uploadedBy', '') == request.auth.uid
+         && resource.data.get('status', '') in ['pending', 'rejected']
+         && bookChanges().hasOnly(['title', 'author', 'category', 'url', 'isbn',
+                                   'cover', 'status', 'rejectReason'])
+         && request.resource.data.status == 'pending'
+         && request.resource.data.get('rejectReason', '') == ''
+         && validBook(request.resource.data))
+        ||
+        // One-off: books added before approvals existed become approved.
+        (bookStaff() && !('status' in resource.data)
+         && bookChanges().hasOnly(['status', 'uploadedBy'])
+         && request.resource.data.status == 'approved'));
+
+      // The uploader, library staff, admin staff and admin may delete.
+      allow delete: if active()
+                    && (bookStaff()
+                        || resource.data.get('uploadedBy', '') == request.auth.uid);
     }
 
     // ---- Tech news -----------------------------------------------------
     match /news/{id} {
       allow read: if notDriver();
       allow create: if canPostNews()
-                    && (isAdmin() || request.resource.data.department == profile().department);
+                    && (isAdmin() || request.resource.data.department == profile().department)
+                    && request.resource.data.keys().hasOnly(
+                         ['title', 'body', 'department', 'authorName', 'createdAt', 'image'])
+                    && (!('image' in request.resource.data)
+                        || (request.resource.data.image is string
+                            && request.resource.data.image.size() <= 700000));
       allow delete: if isAdmin() || isAdminStaff()
                     || (canPostNews() && resource.data.department == profile().department);
     }

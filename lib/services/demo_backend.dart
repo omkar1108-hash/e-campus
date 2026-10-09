@@ -5,6 +5,7 @@ import '../models/book.dart';
 import '../models/bus.dart';
 import '../models/chat_message.dart';
 import '../models/news_item.dart';
+import '../utils/rbac.dart';
 import 'backend.dart';
 
 /// In-memory backend so the app can be demoed without Firebase.
@@ -126,27 +127,40 @@ class DemoBackend implements Backend {
       UserRole.busDriver,
     );
 
-    _books.addAll(const [
-      Book(
+    _books.addAll([
+      const Book(
         id: 'b1',
         title: 'Flutter in Action',
         author: 'Eric Windmill',
         category: 'Mobile',
         url: 'https://docs.flutter.dev/',
+        isbn: '9781617296147',
       ),
-      Book(
+      const Book(
         id: 'b2',
         title: 'Introduction to Algorithms',
         author: 'Cormen et al.',
         category: 'Computer Science',
         url: 'https://mitpress.mit.edu/9780262046305/',
+        isbn: '978-0-262-04630-5',
       ),
-      Book(
+      const Book(
         id: 'b3',
         title: 'Computer Networks',
         author: 'Andrew Tanenbaum',
         category: 'Networking',
         url: 'https://www.pearson.com/',
+      ),
+      Book(
+        id: 'b4',
+        title: 'Data Mining Notes',
+        author: 'Prof. Rao',
+        category: 'Data Science',
+        url: 'https://example.com/data-mining',
+        status: BookStatus.pending,
+        uploadedBy: 'u-teacher',
+        uploadedByName: 'Prof. Rao',
+        createdAt: DateTime.now(),
       ),
     ]);
 
@@ -290,9 +304,25 @@ class DemoBackend implements Backend {
   }
 
   // ---- Books ------------------------------------------------------------
+  bool _canSeeBook(AppUser viewer, Book b) =>
+      Rbac.seesAllBooks(viewer) ||
+      b.status == BookStatus.approved ||
+      (viewer.role == UserRole.teacher && b.uploadedBy == viewer.uid);
+
   @override
-  Stream<List<Book>> watchBooks() =>
-      _live(_booksCtl.stream, () => List.of(_books));
+  Stream<List<Book>> watchBooks(AppUser viewer) => _live(
+    _booksCtl.stream,
+    () =>
+        _books.where((b) => _canSeeBook(viewer, b)).toList()
+          ..sort((a, b) => a.title.compareTo(b.title)),
+  );
+
+  void _replaceBook(String id, Book Function(Book b) change) {
+    final i = _books.indexWhere((b) => b.id == id);
+    if (i < 0) return;
+    _books[i] = change(_books[i]);
+    _booksCtl.add(null);
+  }
 
   @override
   Future<void> addBook(Book book) async {
@@ -303,16 +333,58 @@ class DemoBackend implements Backend {
         author: book.author,
         category: book.category,
         url: book.url,
+        isbn: book.isbn,
+        cover: book.cover,
+        status: book.status,
+        uploadedBy: book.uploadedBy,
+        uploadedByName: book.uploadedByName,
+        createdAt: DateTime.now(),
       ),
     );
     _booksCtl.add(null);
   }
 
   @override
+  Future<void> updateBook(Book book, {bool resubmit = false}) async =>
+      _replaceBook(
+        book.id,
+        (old) => Book(
+          id: old.id,
+          title: book.title,
+          author: book.author,
+          category: book.category,
+          url: book.url,
+          isbn: book.isbn,
+          cover: book.cover,
+          status: resubmit ? BookStatus.pending : old.status,
+          uploadedBy: old.uploadedBy,
+          uploadedByName: old.uploadedByName,
+          rejectReason: resubmit ? '' : old.rejectReason,
+          createdAt: old.createdAt,
+        ),
+      );
+
+  @override
+  Future<void> reviewBook(
+    String id, {
+    required bool approve,
+    String reason = '',
+  }) async => _replaceBook(
+    id,
+    (b) => b.copyWith(
+      status: approve ? BookStatus.approved : BookStatus.rejected,
+      rejectReason: approve ? '' : reason,
+    ),
+  );
+
+  @override
   Future<void> deleteBook(String id) async {
     _books.removeWhere((b) => b.id == id);
     _booksCtl.add(null);
   }
+
+  @override
+  Future<int> approveLegacyBooks() async => 0;
 
   // ---- News -------------------------------------------------------------
   @override
@@ -333,6 +405,7 @@ class DemoBackend implements Backend {
         department: item.department,
         authorName: item.authorName,
         createdAt: item.createdAt,
+        image: item.image,
       ),
     );
     _newsCtl.add(null);

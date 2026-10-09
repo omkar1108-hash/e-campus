@@ -6,7 +6,9 @@ import '../models/app_user.dart';
 import '../models/news_item.dart';
 import '../services/backend.dart';
 import '../utils/rbac.dart';
+import '../widgets/image_picker_field.dart';
 import '../widgets/link_text.dart';
+import '../widgets/post_image.dart';
 
 /// Tech news for the user's department. Class representatives (and teachers /
 /// admins) post items; every student in that department sees them.
@@ -58,6 +60,10 @@ class NewsScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (n.image != null && n.image!.isNotEmpty) ...[
+                        PostImage(base64Image: n.image!),
+                        const SizedBox(height: 12),
+                      ],
                       Row(
                         children: [
                           Expanded(
@@ -107,6 +113,7 @@ class _PostNewsDialogState extends State<_PostNewsDialog> {
   final _formKey = GlobalKey<FormState>();
   final _title = TextEditingController();
   final _body = TextEditingController();
+  String? _image;
 
   @override
   void dispose() {
@@ -140,6 +147,12 @@ class _PostNewsDialogState extends State<_PostNewsDialog> {
                 decoration: const InputDecoration(labelText: 'Details'),
                 validator: _required,
               ),
+              const SizedBox(height: 12),
+              ImagePickerField(
+                value: _image,
+                label: 'Add poster / image',
+                onChanged: (v) => setState(() => _image = v),
+              ),
             ],
           ),
         ),
@@ -161,6 +174,7 @@ class _PostNewsDialogState extends State<_PostNewsDialog> {
                 department: widget.user.department,
                 authorName: widget.user.name,
                 createdAt: DateTime.now(),
+                image: _image,
               ),
             );
           },

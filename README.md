@@ -12,12 +12,12 @@ class representatives, teachers and administrators.
 | Role-aware drawer | Menu entries are generated from the user's role |
 | Account management | Admin / admin staff create, edit and **disable** accounts (Manage Users). Disabled people cannot sign in |
 | Class representatives | Teachers pick them for their own department: at most 2 girls and 2 boys |
-| E-Library | Search, read/download books (link-based); teachers, library staff, admin staff and admin add and remove books |
+| E-Library | Search, read/download books (link-based) with **cover pictures** (picked from the gallery, or fetched from the ISBN via Open Library). Teachers' books go to a **verification queue**: library staff approve, or reject with a reason; the teacher sees the reason, fixes the book and resubmits. Library staff, admin staff and admin add books without approval |
 | Bus tracking | Several buses, each with a driver and the departments allowed to track it. Drivers **start / end a trip** and share their phone's GPS. Google Maps on Android / iOS, OpenStreetMap map on Windows, macOS, Linux and web |
 | Manage buses | Admin / admin staff add buses, assign a driver and choose the departments that can track each bus |
 | Chat | One-to-one, real time. **Edit** (15 min), **delete for everyone**, **pin** messages; **unread dots** and a drawer badge; a **banner** when a message arrives while the app is open (no push notifications while it is closed - that needs a paid Firebase plan); **department filter** on the people list; links in messages are clickable |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
-| Tech news | Class reps / teachers / admin staff / admin post; everyone but drivers reads their own department's news |
+| Tech news | Class reps / teachers / admin staff / admin post, optionally with a **poster picture** from the gallery; everyone but drivers reads their own department's news |
 
 ### Permission matrix
 
@@ -27,7 +27,9 @@ class representatives, teachers and administrators.
 | Library, chatbot, read news | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
 | Post news (own department) | | ✔ | ✔ | | | ✔ | ✔ (any) |
 | Delete news | | own dept | own dept | | | any | any |
-| Add / remove books | | | ✔ | ✔ | | ✔ | ✔ |
+| Add books | | | ✔ (needs verification) | ✔ | | ✔ | ✔ |
+| Verify (approve / reject) teachers' books | | | | ✔ | | | |
+| Delete books | | | own | any | | any | any |
 | Start / end a bus trip (share location) | | | | | ✔ (own bus) | | |
 | Track buses | own dept | own dept | all | all | own bus | all | all |
 | Add buses, assign drivers / departments | | | | | | ✔ | ✔ |
@@ -96,3 +98,13 @@ test/                       RBAC, backend and widget-flow tests
 flutter analyze
 flutter test
 ```
+
+## Pictures
+
+News posters and book covers are shrunk on the phone (max 800 px, JPEG,
+usually 50-250 KB) and stored inside the Firestore document itself, so no
+paid Firebase Storage is needed. Firestore documents are limited to 1 MB, so
+very detailed pictures are refused with a message. Books added before the
+approval flow existed need a one-time **"Approve books added before this
+update"** (Library -> the menu next to the search box, as library staff, admin
+staff or admin).
