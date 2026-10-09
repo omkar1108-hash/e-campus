@@ -22,6 +22,7 @@ Future<void> tapButton(WidgetTester t, String label) async {
 }
 
 void main() {
+  backTests();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('opening page', () {
@@ -567,5 +568,22 @@ void main() {
       );
     }
     expect(DemoBackend.demoPassword, isNotEmpty);
+  });
+}
+
+void backTests() {
+  testWidgets('back returns to the dashboard, then asks before exiting', (
+    t,
+  ) async {
+    await startApp(t);
+    await login(t, 'student@ecampus.demo');
+    await openMenuItem(t, 'Notices');
+    expect(find.text('Welcome, Sneha Student'), findsNothing);
+    await t.binding.handlePopRoute();
+    await t.pumpAndSettle();
+    expect(find.text('Welcome, Sneha Student'), findsOneWidget);
+    await t.binding.handlePopRoute();
+    await t.pump();
+    expect(find.text('Press back again to exit'), findsOneWidget);
   });
 }
