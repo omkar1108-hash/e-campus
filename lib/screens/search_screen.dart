@@ -38,7 +38,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _subs.addAll([
       backend.watchBooks(u).listen((v) => setState(() => _books = v)),
       backend.watchNews(u.department).listen((v) => setState(() => _news = v)),
-      backend.watchNotices().listen((v) => setState(() => _notices = v)),
+      backend.watchNotices(u).listen((v) => setState(() => _notices = v)),
     ]);
   }
 

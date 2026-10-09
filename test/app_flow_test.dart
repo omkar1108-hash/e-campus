@@ -85,6 +85,13 @@ void main() {
     expect(_inDrawer('Class Representatives'), findsNothing);
   });
 
+  testWidgets('a plain teacher cannot choose class representatives', (t) async {
+    await _start(t);
+    await _login(t, 'teacher@ecampus.demo');
+    await _openDrawer(t);
+    expect(_inDrawer('Class Representatives'), findsNothing);
+  });
+
   testWidgets('bus driver drawer is only dashboard, bus, chat and complaints', (
     t,
   ) async {
@@ -146,11 +153,13 @@ void main() {
     expect(find.text('Flutter 3.47 released'), findsOneWidget);
   });
 
-  testWidgets('teacher assigns class reps within the 2+2 limit', (t) async {
+  testWidgets('head of department assigns class reps within the 2+2 limit', (
+    t,
+  ) async {
     final backend = await _start(t);
     // Ravi already is a boy representative; make Arjun the second one.
     await backend.setUserRole('u-student2', UserRole.classRep);
-    await _login(t, 'teacher@ecampus.demo');
+    await _login(t, 'hod@ecampus.demo');
     await _openMenuItem(t, 'Class Representatives');
     expect(find.text('Girls: 0/2   ·   Boys: 2/2'), findsOneWidget);
     // Kabir would be a third boy: promotion must be refused.

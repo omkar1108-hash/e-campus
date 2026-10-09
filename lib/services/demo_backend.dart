@@ -131,6 +131,7 @@ class DemoBackend implements Backend {
     );
     _uidByEmail['iyer@ecampus.demo'] = 'u-teacher-mba';
     _passwords['u-teacher-mba'] = demoPassword;
+    user('u-hod', 'hod@ecampus.demo', 'Dr. Mehta (HOD)', UserRole.hod);
     user(
       'u-committee',
       'committee@ecampus.demo',
@@ -423,7 +424,7 @@ class DemoBackend implements Backend {
   bool _canSeeBook(AppUser viewer, Book b) =>
       Rbac.seesAllBooks(viewer) ||
       b.status == BookStatus.approved ||
-      (viewer.role == UserRole.teacher && b.uploadedBy == viewer.uid);
+      (viewer.role.isTeaching && b.uploadedBy == viewer.uid);
 
   @override
   Stream<List<Book>> watchBooks(AppUser viewer) => _live(
@@ -687,6 +688,7 @@ class DemoBackend implements Backend {
         case UserRole.admin:
         case UserRole.adminStaff:
         case UserRole.teacher:
+        case UserRole.hod:
         case UserRole.libraryStaff:
         case UserRole.grievanceCommittee:
           return true;
@@ -795,9 +797,16 @@ class DemoBackend implements Backend {
 
   // ---- Notices ----------------------------------------------------------
   @override
-  Stream<List<Notice>> watchNotices() => _live(
+  Stream<List<Notice>> watchNotices(AppUser viewer) => _live(
     _campusCtl.stream,
-    () => _notices.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+    () =>
+        _notices
+            .where(
+              (n) =>
+                  Rbac.canSeeAllNotices(viewer) || n.audience.includes(viewer),
+            )
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
   );
 
   @override
@@ -819,6 +828,7 @@ class DemoBackend implements Backend {
         createdAt: n.createdAt,
         image: n.image,
         public: n.public,
+        audience: n.audience,
       ),
     );
     _campusCtl.add(null);
@@ -837,25 +847,36 @@ class DemoBackend implements Backend {
 
   // ---- Emergency alerts ---------------------------------------------------
   @override
-  Stream<List<EmergencyAlert>> watchActiveAlerts() => _live(
+  Stream<List<EmergencyAlert>> watchActiveAlerts(AppUser viewer) => _live(
     _campusCtl.stream,
     () =>
-        _alerts.where((a) => a.active).toList()
+        _alerts
+            .where(
+              (a) =>
+                  a.active &&
+                  (viewer.role == UserRole.admin ||
+                      a.audience.includes(viewer)),
+            )
+            .toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
   );
 
   @override
-  Future<void> sendAlert(String message) async {
+  Future<void> sendAlert(
+    String message, {
+    Audience audience = Audience.everyone,
+  }) async {
     _alerts.add(
       EmergencyAlert(
         id: _nextId(),
         message: message,
+        audience: audience,
         authorName: _actor?.name ?? '',
         createdAt: DateTime.now(),
       ),
     );
     _campusCtl.add(null);
-    _log('alert.sent', 'alert', message);
+    _log('alert.sent', 'alert', message, details: audience.describe());
   }
 
   @override
@@ -869,6 +890,7 @@ class DemoBackend implements Backend {
       authorName: a.authorName,
       createdAt: a.createdAt,
       active: false,
+      audience: a.audience,
     );
     _campusCtl.add(null);
     _log('alert.cleared', 'alert', a.message);
@@ -898,7 +920,7 @@ class DemoBackend implements Backend {
   Stream<List<Assignment>> watchAssignments(AppUser viewer) =>
       _live(_campusCtl.stream, () {
         bool visible(Assignment a) {
-          if (viewer.role == UserRole.teacher) return a.createdBy == viewer.uid;
+          if (viewer.role.isTeaching) return a.createdBy == viewer.uid;
           if (Rbac.isStudent(viewer)) return a.department == viewer.department;
           return false;
         }
@@ -1089,14 +1111,14 @@ class DemoBackend implements Backend {
           ComplaintReply(
             id: _nextId(),
             kind: 'status',
-            byCommittee: true,
+            byCommittee: _actor != null && Rbac.canHandleComplaints(_actor!),
             authorName: _actor?.name ?? '',
-            text: note.isEmpty ? 'Status changed to ${status.label}.' : note,
+            text: note.isEmpty ? 'Status changed to ${status.chip}.' : note,
             createdAt: now,
           ),
         );
     _campusCtl.add(null);
-    _log('complaint.status', 'complaint', c.subject, details: status.label);
+    _log('complaint.status', 'complaint', c.subject, details: status.chip);
   }
 
   // ---- Activity log -----------------------------------------------------

@@ -280,7 +280,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         late final String secondLabel;
         late final List<Book> second;
         late final String secondEmpty;
-        if (_me.role == UserRole.teacher) {
+        if (_me.role.isTeaching) {
           second = all.where((b) => b.uploadedBy == _me.uid).toList();
           final open = second
               .where((b) => b.status != BookStatus.approved)

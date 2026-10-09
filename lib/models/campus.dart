@@ -2,8 +2,82 @@
 /// timetable, assignments, attendance, complaints and the activity log.
 library;
 
+import 'app_user.dart';
+
 DateTime _time(Object? ms) =>
     DateTime.fromMillisecondsSinceEpoch(((ms ?? 0) as num).toInt());
+
+// ---- Audience -----------------------------------------------------------
+/// Who a notice or an alert is for: some branches (or all) and some groups
+/// of people (or everybody).
+class Audience {
+  const Audience({this.departments = const [], this.groups = const []});
+
+  /// Empty = every branch.
+  final List<String> departments;
+
+  /// Empty = everybody. Values are in [groupLabels].
+  final List<String> groups;
+
+  static const groupLabels = <String, String>{
+    'student': 'Students',
+    'teacher': 'Teachers',
+    'staff': 'Other staff',
+    'driver': 'Bus drivers',
+  };
+
+  static const everyone = Audience();
+
+  /// The group a person belongs to: students (and class reps), teachers
+  /// (and heads of department), bus drivers, and all other staff.
+  static String groupOf(UserRole role) => switch (role) {
+    UserRole.student || UserRole.classRep => 'student',
+    UserRole.teacher || UserRole.hod => 'teacher',
+    UserRole.busDriver => 'driver',
+    _ => 'staff',
+  };
+
+  /// Every "branch|group" pair this audience covers. A person is in the
+  /// audience when one of [targetsOf] appears here. (Stored on the document
+  /// so a single query can fetch what one person may see.)
+  List<String> get targets {
+    final ds = departments.isEmpty ? const ['all'] : departments;
+    final gs = groups.isEmpty ? const ['all'] : groups;
+    return [
+      for (final d in ds)
+        for (final g in gs) '$d|$g',
+    ];
+  }
+
+  /// The four target values that match this person.
+  static List<String> targetsOf(AppUser u) {
+    final g = groupOf(u.role);
+    final d = u.department;
+    return ['all|all', 'all|$g', '$d|all', '$d|$g'];
+  }
+
+  bool includes(AppUser u) => targets.any(targetsOf(u).contains);
+
+  factory Audience.fromMap(Map<String, dynamic> m) => Audience(
+    departments: [...?(m['departments'] as List?)?.cast<String>()],
+    groups: [...?(m['audience'] as List?)?.cast<String>()],
+  );
+
+  Map<String, dynamic> toMap() => {
+    'departments': departments,
+    'audience': groups,
+    'targets': targets,
+  };
+
+  /// "MCA, MBA · Students and teachers" for display.
+  String describe() {
+    final where = departments.isEmpty ? 'All branches' : departments.join(', ');
+    final who = groups.isEmpty
+        ? 'everyone'
+        : groups.map((g) => groupLabels[g] ?? g).join(', ');
+    return '$where · $who';
+  }
+}
 
 // ---- Notices ------------------------------------------------------------
 class Notice {
@@ -15,6 +89,7 @@ class Notice {
     required this.createdAt,
     this.image,
     this.public = false,
+    this.audience = Audience.everyone,
   });
 
   final String id;
@@ -23,6 +98,7 @@ class Notice {
   final String authorName;
   final DateTime createdAt;
   final String? image;
+  final Audience audience;
 
   /// Public notices also appear on the opening page, before sign-in.
   final bool public;
@@ -33,6 +109,7 @@ class Notice {
     'authorName': authorName,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'public': public,
+    ...audience.toMap(),
     if (image != null) 'image': image,
   };
 
@@ -44,6 +121,7 @@ class Notice {
     createdAt: _time(m['createdAt']),
     image: m['image'] as String?,
     public: (m['public'] ?? false) as bool,
+    audience: Audience.fromMap(m),
   );
 }
 
@@ -55,6 +133,7 @@ class EmergencyAlert {
     required this.authorName,
     required this.createdAt,
     this.active = true,
+    this.audience = Audience.everyone,
   });
 
   final String id;
@@ -62,9 +141,11 @@ class EmergencyAlert {
   final String authorName;
   final DateTime createdAt;
   final bool active;
+  final Audience audience;
 
   Map<String, dynamic> toMap() => {
     'message': message,
+    ...audience.toMap(),
     'authorName': authorName,
     'createdAt': createdAt.millisecondsSinceEpoch,
     'active': active,
@@ -77,6 +158,7 @@ class EmergencyAlert {
         authorName: (m['authorName'] ?? '') as String,
         createdAt: _time(m['createdAt']),
         active: (m['active'] ?? false) as bool,
+        audience: Audience.fromMap(m),
       );
 }
 
@@ -319,16 +401,27 @@ enum ComplaintCategory {
       .firstWhere((c) => c.name == n, orElse: () => ComplaintCategory.other);
 }
 
+/// Sent -> Working on it -> Resolved (by the committee) -> Closed (the person
+/// who filed it confirms the fix). If they say it is not fixed, it goes back
+/// to "Working on it".
 enum ComplaintStatus {
-  submitted('Submitted'),
-  inReview('In review'),
-  resolved('Resolved'),
+  submitted('Sent'),
+  inReview('Working on it'),
+  resolved('Resolved - waiting for your confirmation'),
+  closed('Closed - confirmed by the complainant'),
   rejected('Rejected');
 
   const ComplaintStatus(this.label);
   final String label;
 
-  bool get isFinal => this == resolved || this == rejected;
+  /// Short name for chips.
+  String get chip => switch (this) {
+    resolved => 'Resolved',
+    closed => 'Closed',
+    _ => label,
+  };
+
+  bool get isFinal => this == closed || this == rejected;
 
   static ComplaintStatus fromName(String? n) => ComplaintStatus.values
       .firstWhere((c) => c.name == n, orElse: () => ComplaintStatus.submitted);
@@ -339,6 +432,11 @@ enum ComplaintStatus {
     inReview => const [resolved, rejected],
     _ => const [],
   };
+
+  /// What the person who filed it may do once it is marked resolved:
+  /// confirm (close) or send it back for more work.
+  List<ComplaintStatus> get filerNext =>
+      this == resolved ? const [closed, inReview] : const [];
 }
 
 class Complaint {

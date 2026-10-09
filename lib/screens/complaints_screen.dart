@@ -11,7 +11,8 @@ import '../widgets/common.dart';
 Color statusColor(ComplaintStatus s) => switch (s) {
   ComplaintStatus.submitted => Colors.orange.shade800,
   ComplaintStatus.inReview => Colors.blue.shade700,
-  ComplaintStatus.resolved => Colors.green.shade700,
+  ComplaintStatus.resolved => Colors.teal.shade700,
+  ComplaintStatus.closed => Colors.green.shade800,
   ComplaintStatus.rejected => Colors.red.shade700,
 };
 
@@ -25,7 +26,7 @@ class StatusChip extends StatelessWidget {
     final c = statusColor(status);
     return Chip(
       visualDensity: VisualDensity.compact,
-      label: Text(status.label, style: TextStyle(color: c, fontSize: 12)),
+      label: Text(status.chip, style: TextStyle(color: c, fontSize: 12)),
       side: BorderSide(color: c.withValues(alpha: 0.6)),
       backgroundColor: c.withValues(alpha: 0.1),
     );
@@ -127,8 +128,11 @@ class _MineTab extends StatelessWidget {
                   trailing: StatusChip(c.status),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          ComplaintDetailScreen(user: user, complaintId: c.id),
+                      builder: (_) => ComplaintDetailScreen(
+                        user: user,
+                        complaintId: c.id,
+                        asFiler: true,
+                      ),
                     ),
                   ),
                 ),
@@ -294,7 +298,7 @@ class _InboxTabState extends State<_InboxTab> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
                         label: Text(
-                          '${s.label} (${all.where((c) => c.status == s).length})',
+                          '${s.chip} (${all.where((c) => c.status == s).length})',
                         ),
                         selected: _filter == s,
                         onSelected: (_) => setState(() => _filter = s),
@@ -352,10 +356,14 @@ class ComplaintDetailScreen extends StatefulWidget {
     super.key,
     required this.user,
     required this.complaintId,
+    this.asFiler = false,
   });
 
   final AppUser user;
   final String complaintId;
+
+  /// Opened from "My complaints": the viewer is the person who filed it.
+  final bool asFiler;
 
   @override
   State<ComplaintDetailScreen> createState() => _ComplaintDetailScreenState();
@@ -388,11 +396,11 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
     await context.read<Backend>().addReply(widget.complaintId, text);
   }
 
-  Future<void> _changeStatus(ComplaintStatus to) async {
+  Future<void> _changeStatus(ComplaintStatus to, {String? title}) async {
     final backend = context.read<Backend>();
     final note = await showDialog<String>(
       context: context,
-      builder: (_) => _StatusDialog(status: to),
+      builder: (_) => _StatusDialog(status: to, title: title),
     );
     if (note != null) {
       await backend.setComplaintStatus(widget.complaintId, to, note: note);
@@ -420,7 +428,7 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
           // while it is open. The administrator just reads.
           final canReply =
               Rbac.canHandleComplaints(me) ||
-              (!Rbac.canViewAllComplaints(me) && !c.status.isFinal);
+              (widget.asFiler && !c.status.isFinal);
           return Column(
             children: [
               Expanded(
@@ -483,9 +491,47 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
                           for (final s in c.status.next)
                             OutlinedButton(
                               onPressed: () => _changeStatus(s),
-                              child: Text('Mark ${s.label}'),
+                              child: Text('Mark ${s.chip}'),
                             ),
                         ],
+                      ),
+                    ],
+                    if (widget.asFiler && c.status.filerNext.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Card(
+                        color: theme.colorScheme.tertiaryContainer,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'The committee says this is resolved. Is it '
+                                'really fixed for you?',
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  FilledButton(
+                                    onPressed: () => _changeStatus(
+                                      ComplaintStatus.closed,
+                                      title: 'Confirm it is resolved?',
+                                    ),
+                                    child: const Text('Yes, it is resolved'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: () => _changeStatus(
+                                      ComplaintStatus.inReview,
+                                      title: 'Send back to the committee?',
+                                    ),
+                                    child: const Text('No, work on it again'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                     const Divider(height: 32),
@@ -577,9 +623,10 @@ class _ReplyTile extends StatelessWidget {
 }
 
 class _StatusDialog extends StatefulWidget {
-  const _StatusDialog({required this.status});
+  const _StatusDialog({required this.status, this.title});
 
   final ComplaintStatus status;
+  final String? title;
 
   @override
   State<_StatusDialog> createState() => _StatusDialogState();
@@ -597,13 +644,11 @@ class _StatusDialogState extends State<_StatusDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Mark as ${widget.status.label}?'),
+      title: Text(widget.title ?? 'Mark as ${widget.status.chip}?'),
       content: TextField(
         controller: _note,
         maxLines: 3,
-        decoration: const InputDecoration(
-          labelText: 'Note for the complainant (optional)',
-        ),
+        decoration: const InputDecoration(labelText: 'Note (optional)'),
       ),
       actions: [
         TextButton(

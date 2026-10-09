@@ -313,7 +313,7 @@ class FirebaseBackend implements Backend {
           .where('status', isEqualTo: BookStatus.approved.name)
           .snapshots()
           .map(_bookList);
-      books = viewer.role == UserRole.teacher
+      books = viewer.role.isTeaching
           ? mergeLists(
               approved,
               _books
@@ -529,6 +529,7 @@ class FirebaseBackend implements Backend {
       case UserRole.admin:
       case UserRole.adminStaff:
       case UserRole.teacher:
+      case UserRole.hod:
       case UserRole.libraryStaff:
       case UserRole.grievanceCommittee:
         query = _buses;
@@ -594,7 +595,15 @@ class FirebaseBackend implements Backend {
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   @override
-  Stream<List<Notice>> watchNotices() => _notices.snapshots().map(_noticeList);
+  Stream<List<Notice>> watchNotices(AppUser viewer) =>
+      (Rbac.canSeeAllNotices(viewer)
+              ? _notices
+              : _notices.where(
+                  'targets',
+                  arrayContainsAny: Audience.targetsOf(viewer),
+                ))
+          .snapshots()
+          .map(_noticeList);
 
   @override
   Stream<List<Notice>> watchPublicNotices() =>
@@ -615,17 +624,30 @@ class FirebaseBackend implements Backend {
       _db.collection('alerts');
 
   @override
-  Stream<List<EmergencyAlert>> watchActiveAlerts() => _alerts
-      .where('active', isEqualTo: true)
-      .snapshots()
-      .map(
-        (s) =>
-            s.docs.map((d) => EmergencyAlert.fromMap(d.id, d.data())).toList()
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
-      );
+  Stream<List<EmergencyAlert>> watchActiveAlerts(AppUser viewer) {
+    // Only the audience filter is sent to the server (an extra "active"
+    // filter would need an index); cleared alerts are dropped here.
+    final Query<Map<String, dynamic>> q = viewer.role == UserRole.admin
+        ? _alerts.orderBy('createdAt', descending: true).limit(50)
+        : _alerts.where(
+            'targets',
+            arrayContainsAny: Audience.targetsOf(viewer),
+          );
+    return q.snapshots().map(
+      (s) =>
+          s.docs
+              .map((d) => EmergencyAlert.fromMap(d.id, d.data()))
+              .where((a) => a.active)
+              .toList()
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+    );
+  }
 
   @override
-  Future<void> sendAlert(String message) async {
+  Future<void> sendAlert(
+    String message, {
+    Audience audience = Audience.everyone,
+  }) async {
     final me = _actor!;
     await _alerts.add(
       EmergencyAlert(
@@ -633,9 +655,10 @@ class FirebaseBackend implements Backend {
         message: message,
         authorName: me.name,
         createdAt: DateTime.now(),
+        audience: audience,
       ).toMap(),
     );
-    await _log('alert.sent', 'alert', message);
+    await _log('alert.sent', 'alert', message, details: audience.describe());
   }
 
   @override
@@ -677,7 +700,7 @@ class FirebaseBackend implements Backend {
   @override
   Stream<List<Assignment>> watchAssignments(AppUser viewer) {
     final Query<Map<String, dynamic>>? q;
-    if (viewer.role == UserRole.teacher) {
+    if (viewer.role.isTeaching) {
       q = _assignments.where('createdBy', isEqualTo: viewer.uid);
     } else if (Rbac.isStudent(viewer)) {
       q = _assignments.where('department', isEqualTo: viewer.department);
@@ -869,14 +892,14 @@ class FirebaseBackend implements Backend {
       ComplaintReply(
         id: '',
         kind: 'status',
-        byCommittee: true,
+        byCommittee: Rbac.canHandleComplaints(me),
         authorName: me.name,
-        text: note.isEmpty ? 'Status changed to ${status.label}.' : note,
+        text: note.isEmpty ? 'Status changed to ${status.chip}.' : note,
         createdAt: now,
       ).toMap(),
     );
     await batch.commit();
-    await _log('complaint.status', 'complaint', subject, details: status.label);
+    await _log('complaint.status', 'complaint', subject, details: status.chip);
   }
 
   // ---- Activity log -----------------------------------------------------

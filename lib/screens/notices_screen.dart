@@ -6,6 +6,7 @@ import '../models/app_user.dart';
 import '../models/campus.dart';
 import '../services/backend.dart';
 import '../utils/rbac.dart';
+import '../widgets/audience_picker.dart';
 import '../widgets/common.dart';
 import '../widgets/image_picker_field.dart';
 import '../widgets/link_text.dart';
@@ -39,7 +40,7 @@ class NoticesScreen extends StatelessWidget {
             )
           : null,
       body: Live<List<Notice>>(
-        stream: backend.watchNotices(),
+        stream: backend.watchNotices(user),
         builder: (context, items) {
           if (items.isEmpty) {
             return const EmptyState(
@@ -86,6 +87,11 @@ class NoticesScreen extends StatelessWidget {
                       const SizedBox(height: 4),
                       LinkText(n.body),
                       const SizedBox(height: 8),
+                      if (Rbac.canPostNotices(user))
+                        Text(
+                          'For: ${n.audience.describe()}',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                       Text(
                         '${n.authorName} · ${fmt.format(n.createdAt)}',
                         style: Theme.of(context).textTheme.bodySmall,
@@ -117,6 +123,7 @@ class _PostNoticeDialogState extends State<_PostNoticeDialog> {
   final _body = TextEditingController();
   String? _image;
   bool _public = false;
+  Audience _audience = Audience.everyone;
 
   @override
   void dispose() {
@@ -148,12 +155,28 @@ class _PostNoticeDialogState extends State<_PostNoticeDialog> {
                 validator: requiredField,
               ),
               const SizedBox(height: 8),
+              AudiencePicker(
+                value: _audience,
+                onChanged: (a) => setState(() {
+                  _audience = a;
+                  // Only a notice for everybody can be public.
+                  if (a.departments.isNotEmpty || a.groups.isNotEmpty) {
+                    _public = false;
+                  }
+                }),
+              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Show on the opening page'),
-                subtitle: const Text('Visible to anyone, even before sign-in'),
+                subtitle: const Text(
+                  'Visible to anyone, even before sign-in. Only for notices '
+                  'to all branches and everyone.',
+                ),
                 value: _public,
-                onChanged: (v) => setState(() => _public = v),
+                onChanged:
+                    _audience.departments.isEmpty && _audience.groups.isEmpty
+                    ? (v) => setState(() => _public = v)
+                    : null,
               ),
               ImagePickerField(
                 value: _image,
@@ -182,6 +205,7 @@ class _PostNoticeDialogState extends State<_PostNoticeDialog> {
                 createdAt: DateTime.now(),
                 image: _image,
                 public: _public,
+                audience: _audience,
               ),
             );
           },

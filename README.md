@@ -8,10 +8,10 @@ class representatives, teachers and administrators.
 | Feature | Details |
 |---|---|
 | Email login | Firebase email + password. Accounts are **created by administrators** (no self sign-up). The new person gets a verification email and a "set your password" email |
-| Eight roles | `student`, `classRep`, `teacher`, `libraryStaff`, `busDriver`, `adminStaff`, `grievanceCommittee`, `admin`. Rules live in `lib/utils/rbac.dart` and are enforced server-side in `firestore.rules` |
+| Nine roles | `student`, `classRep`, `teacher`, `hod` (head of department: a teacher who also picks class representatives), `libraryStaff`, `busDriver`, `adminStaff`, `grievanceCommittee`, `admin`. Rules live in `lib/utils/rbac.dart` and are enforced server-side in `firestore.rules` |
 | Role-aware drawer | Menu entries are generated from the user's role |
 | Account management | Admin / admin staff create, edit and **disable** accounts (Manage Users). Disabled people cannot sign in |
-| Class representatives | Teachers pick them for their own department: at most 2 girls and 2 boys |
+| Class representatives | Only the **head of department** picks them for their own department: at most 2 girls and 2 boys (4 per department) |
 | E-Library | Search, read/download books (link-based) with **cover pictures** (picked from the gallery, or fetched from the ISBN via Open Library). Teachers' books go to a **verification queue**: library staff approve, or reject with a reason; the teacher sees the reason, fixes the book and resubmits. Library staff, admin staff and admin add books without approval |
 | Bus tracking | Several buses, each with a driver and the departments allowed to track it. Drivers **start / end a trip** and share their phone's GPS. Google Maps on Android / iOS, OpenStreetMap map on Windows, macOS, Linux and web |
 | Manage buses | Admin / admin staff add buses, assign a driver and choose the departments that can track each bus |
@@ -20,15 +20,15 @@ class representatives, teachers and administrators.
 | Tech news | Class reps / teachers / admin staff / admin post, optionally with a **poster picture** from the gallery; everyone but drivers reads their own department's news |
 | Opening page | The screen before sign-in: college name and contacts (`lib/config/app_config.dart`), the sign-in form, what the app offers and any **public notices**. Two columns on desktop |
 | Dashboard | Live cards per role: unread messages, notices, today's classes, assignments due, attendance %, books to verify, bus status, account counts, new complaints, activity... Each card opens its section |
-| Notices | College-wide announcements by admin / admin staff, optionally with a poster and optionally **public** (shown on the opening page) |
+| Notices | Announcements by admin / admin staff, optionally with a poster. Choose the **audience**: which branches (or all) and which groups (students, teachers, other staff, bus drivers, or everyone). Notices for everybody can also be **public** (shown on the opening page). Students and class reps cannot post |
 | Timetable | One weekly timetable per department, edited by admin staff / admin. Teachers also get **My classes** across departments |
 | Attendance | Teachers mark a lecture (department, subject, date) and can correct it later; students see their percentage per subject and overall, with a warning under 75% |
 | Assignments & notes | Teachers share assignments (with due date) and notes as **links** (Drive, OneDrive...); students see their department's items |
-| Complaints | Anyone except the committee files a complaint (category, subject, details), **optionally anonymous**. The **Grievance Committee** account reads them, replies and moves them through *Submitted -> In review -> Resolved / Rejected*. The filer follows the status and can answer while it is open. The **administrator** can see who filed an anonymous complaint; the committee cannot |
+| Complaints | Anyone except the committee files a complaint (category, subject, details), **optionally anonymous**. Only the filer, the **Grievance Committee**, admin staff and admin can see it. The committee moves it *Sent -> Working on it -> Resolved*; the **person who filed it then confirms** (*Closed*) or sends it back (*Working on it* again). The committee may also reject it. The **administrator** (only) can see who filed an anonymous complaint |
 | Role badges | Coloured role label next to every name in the chat list and chat header |
 | Search | One search box across e-library books, department news and notices |
 | Activity log | Admin only: who created, edited, disabled or re-enabled accounts, who deleted or reviewed books, deleted news / notices / buses, changed a complaint's status, sent or cleared an alert |
-| Emergency alert | The administrator sends a message; every signed-in user (drivers too) gets a red banner and a one-time pop-up. In-app only, no push notification |
+| Emergency alert | The administrator sends a message to the chosen branches and groups (drivers included if chosen); they get a red banner and a one-time pop-up. In-app only, no push notification. Students and class reps cannot send alerts |
 
 ### Permission matrix
 
@@ -44,17 +44,18 @@ class representatives, teachers and administrators.
 | Start / end a bus trip (share location) | | | | | ✔ (own bus) | | |
 | Track buses | own dept | own dept | all | all | own bus | all | all |
 | Add buses, assign drivers / departments | | | | | | ✔ | ✔ |
-| Choose class reps (own dept) | | | ✔ | | | | |
+| Choose class reps (own dept) | | | | | | | |
+| (head of department only) | | | `hod` | | | | |
 | Create / edit / disable accounts | | | | | | all but admins | all but self |
 | Create accounts of role | | | | | | committee, library, teacher, student, driver | any except class rep |
-| Notices: read | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
+| Notices: read (those aimed at you) | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | Notices: post / delete | | | | | | ✔ | ✔ |
 | Timetable: view | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
 | Timetable: edit | | | | | | ✔ | ✔ |
 | Mark attendance / post assignments (admin and staff do not see assignments) | | | ✔ | | | | |
 | See own attendance | ✔ | ✔ | | | | | |
 | File a complaint | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
-| Read all complaints, reply, change status | | | | | | | read only |
+| Read all complaints | | | | | | ✔ (read) | ✔ (read) |
 | Grievance Committee: all complaints, reply, change status | (committee role) | | | | | | |
 | See who filed an anonymous complaint | | | | | | | ✔ |
 | Search | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |

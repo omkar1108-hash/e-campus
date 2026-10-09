@@ -23,6 +23,7 @@ class Rbac {
   static bool canPostNews(AppUser u) => _is(u, {
     UserRole.classRep,
     UserRole.teacher,
+    UserRole.hod,
     UserRole.adminStaff,
     UserRole.admin,
   });
@@ -38,6 +39,7 @@ class Rbac {
   /// Who may add books. Teachers' books wait for library staff to verify.
   static bool canManageBooks(AppUser u) => _is(u, {
     UserRole.teacher,
+    UserRole.hod,
     UserRole.libraryStaff,
     UserRole.adminStaff,
     UserRole.admin,
@@ -49,14 +51,14 @@ class Rbac {
       _is(u, {UserRole.libraryStaff, UserRole.adminStaff, UserRole.admin});
 
   static BookStatus initialBookStatus(AppUser u) =>
-      u.role == UserRole.teacher ? BookStatus.pending : BookStatus.approved;
+      u.role.isTeaching ? BookStatus.pending : BookStatus.approved;
 
   /// Only library staff approve or reject teachers' books.
   static bool canVerifyBooks(AppUser u) => u.role == UserRole.libraryStaff;
 
   /// Teachers see their own unapproved books; staff see all of them.
   static bool canSeeUnapprovedBooks(AppUser u) =>
-      u.role == UserRole.teacher || seesAllBooks(u);
+      u.role.isTeaching || seesAllBooks(u);
 
   /// The uploader, library staff, admin staff and admin may delete a book.
   static bool canDeleteBook(AppUser u, Book b) =>
@@ -89,6 +91,7 @@ class Rbac {
           UserRole.adminStaff,
           UserRole.grievanceCommittee,
           UserRole.libraryStaff,
+          UserRole.hod,
           UserRole.teacher,
           UserRole.student,
           UserRole.busDriver,
@@ -97,6 +100,7 @@ class Rbac {
         return const [
           UserRole.grievanceCommittee,
           UserRole.libraryStaff,
+          UserRole.hod,
           UserRole.teacher,
           UserRole.student,
           UserRole.busDriver,
@@ -125,6 +129,7 @@ class Rbac {
             UserRole.student,
             UserRole.classRep,
             UserRole.teacher,
+            UserRole.hod,
             UserRole.grievanceCommittee,
             UserRole.libraryStaff,
             UserRole.busDriver,
@@ -132,8 +137,9 @@ class Rbac {
     return {...base, target.role}.toList();
   }
 
-  /// Teachers pick the class representatives of their own department.
-  static bool canAssignClassReps(AppUser u) => u.role == UserRole.teacher;
+  /// Only the head of department picks the class representatives of their
+  /// own department.
+  static bool canAssignClassReps(AppUser u) => u.role == UserRole.hod;
 
   // ---- Campus features ----------------------------------------------------
   static bool isStudent(AppUser u) =>
@@ -143,29 +149,35 @@ class Rbac {
       _is(u, {UserRole.admin, UserRole.adminStaff});
 
   /// Notices, timetable, assignments, search: everybody except bus drivers.
-  static bool canReadNotices(AppUser u) => u.role != UserRole.busDriver;
+  static bool canReadNotices(AppUser u) => true;
   static bool canPostNotices(AppUser u) => _isAdminSide(u);
+
+  /// Notices: drivers read the ones aimed at them.
+  static bool canSeeAllNotices(AppUser u) => _isAdminSide(u);
   static bool canViewTimetable(AppUser u) => u.role != UserRole.busDriver;
   static bool canEditTimetable(AppUser u) => _isAdminSide(u);
   static bool canSearch(AppUser u) => u.role != UserRole.busDriver;
 
   /// Teachers mark attendance and post assignments / notes; students see
   /// their own attendance percentage and their department's work.
-  static bool canMarkAttendance(AppUser u) => u.role == UserRole.teacher;
+  static bool canMarkAttendance(AppUser u) => u.role.isTeaching;
   static bool canViewOwnAttendance(AppUser u) => isStudent(u);
-  static bool canPostAssignments(AppUser u) => u.role == UserRole.teacher;
+  static bool canPostAssignments(AppUser u) => u.role.isTeaching;
   static bool canViewAssignments(AppUser u) =>
-      isStudent(u) || u.role == UserRole.teacher;
+      isStudent(u) || u.role.isTeaching;
   static bool canDeleteAssignment(AppUser u, String createdBy) =>
       canPostAssignments(u) && u.uid == createdBy;
 
   /// Complaints: everybody files them, except the committee that handles
-  /// them. The committee sees every complaint; only the administrator can
-  /// see who filed an anonymous one.
+  /// them. The committee, admin staff and admin see every complaint; only
+  /// the administrator can see who filed an anonymous one.
   static bool canFileComplaint(AppUser u) =>
       u.role != UserRole.grievanceCommittee;
-  static bool canViewAllComplaints(AppUser u) =>
-      _is(u, {UserRole.grievanceCommittee, UserRole.admin});
+  static bool canViewAllComplaints(AppUser u) => _is(u, {
+    UserRole.grievanceCommittee,
+    UserRole.admin,
+    UserRole.adminStaff,
+  });
   static bool canHandleComplaints(AppUser u) =>
       u.role == UserRole.grievanceCommittee;
   static bool canSeeComplaintIdentity(AppUser u) => u.role == UserRole.admin;

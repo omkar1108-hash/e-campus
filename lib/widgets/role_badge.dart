@@ -13,6 +13,7 @@ class RoleBadge extends StatelessWidget {
     UserRole.admin => const Color(0xFFB71C1C),
     UserRole.adminStaff => const Color(0xFFE65100),
     UserRole.teacher => const Color(0xFF1B5E20),
+    UserRole.hod => const Color(0xFF0D47A1),
     UserRole.classRep => const Color(0xFF6A1B9A),
     UserRole.libraryStaff => const Color(0xFF00695C),
     UserRole.grievanceCommittee => const Color(0xFF4E342E),
