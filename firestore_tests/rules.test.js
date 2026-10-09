@@ -655,8 +655,11 @@ test('assignments: teachers post as themselves, students read their department',
   await assertFails(byDept('studentMBA', 'MCA'));
   await assertFails(byDept('driver', 'MCA'));
   await assertSucceeds(getDocs(query(collection(as('teacher'), 'assignments'), where('createdBy', '==', 'teacher'))));
-  await assertSucceeds(getDocs(collection(as('staff'), 'assignments')));
+  for (const uid of ['staff', 'admin', 'library', 'committee'])
+    await assertFails(getDocs(collection(as(uid), 'assignments')));
   await assertFails(getDocs(collection(as('student'), 'assignments')));
+  await assertFails(deleteDoc(doc(as('admin'), 'assignments', 'w1')));
+  await assertFails(deleteDoc(doc(as('staff'), 'assignments', 'w1')));
   await assertFails(deleteDoc(doc(as('teacherMBA'), 'assignments', 'w1')));
   await assertFails(deleteDoc(doc(as('student'), 'assignments', 'w1')));
   await assertSucceeds(deleteDoc(doc(as('teacher'), 'assignments', 'w1')));

@@ -677,9 +677,7 @@ class FirebaseBackend implements Backend {
   @override
   Stream<List<Assignment>> watchAssignments(AppUser viewer) {
     final Query<Map<String, dynamic>>? q;
-    if (viewer.role == UserRole.admin || viewer.role == UserRole.adminStaff) {
-      q = _assignments;
-    } else if (viewer.role == UserRole.teacher) {
+    if (viewer.role == UserRole.teacher) {
       q = _assignments.where('createdBy', isEqualTo: viewer.uid);
     } else if (Rbac.isStudent(viewer)) {
       q = _assignments.where('department', isEqualTo: viewer.department);

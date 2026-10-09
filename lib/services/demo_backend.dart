@@ -898,10 +898,6 @@ class DemoBackend implements Backend {
   Stream<List<Assignment>> watchAssignments(AppUser viewer) =>
       _live(_campusCtl.stream, () {
         bool visible(Assignment a) {
-          if (viewer.role == UserRole.admin ||
-              viewer.role == UserRole.adminStaff) {
-            return true;
-          }
           if (viewer.role == UserRole.teacher) return a.createdBy == viewer.uid;
           if (Rbac.isStudent(viewer)) return a.department == viewer.department;
           return false;

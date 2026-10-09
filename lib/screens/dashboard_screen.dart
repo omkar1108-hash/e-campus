@@ -92,7 +92,7 @@ class DashboardScreen extends StatelessWidget {
           warn: (l) => l.isNotEmpty && overallAttendance(l) < attendanceTarget,
           onTap: () => onOpen('Attendance'),
         ),
-      if (Rbac.canViewAssignments(u) && !Rbac.canEditTimetable(u))
+      if (Rbac.canViewAssignments(u))
         _StatCard<List<Assignment>>(
           icon: Icons.assignment,
           title: Rbac.isStudent(u) ? 'Assignments due' : 'Shared by you',

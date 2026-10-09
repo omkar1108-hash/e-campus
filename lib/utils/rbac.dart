@@ -155,9 +155,9 @@ class Rbac {
   static bool canViewOwnAttendance(AppUser u) => isStudent(u);
   static bool canPostAssignments(AppUser u) => u.role == UserRole.teacher;
   static bool canViewAssignments(AppUser u) =>
-      isStudent(u) || u.role == UserRole.teacher || _isAdminSide(u);
+      isStudent(u) || u.role == UserRole.teacher;
   static bool canDeleteAssignment(AppUser u, String createdBy) =>
-      _isAdminSide(u) || (canPostAssignments(u) && u.uid == createdBy);
+      canPostAssignments(u) && u.uid == createdBy;
 
   /// Complaints: everybody files them, except the committee that handles
   /// them. The committee sees every complaint; only the administrator can

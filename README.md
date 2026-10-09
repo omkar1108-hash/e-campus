@@ -51,7 +51,7 @@ class representatives, teachers and administrators.
 | Notices: post / delete | | | | | | ✔ | ✔ |
 | Timetable: view | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
 | Timetable: edit | | | | | | ✔ | ✔ |
-| Mark attendance / post assignments | | | ✔ | | | | |
+| Mark attendance / post assignments (admin and staff do not see assignments) | | | ✔ | | | | |
 | See own attendance | ✔ | ✔ | | | | | |
 | File a complaint | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | Read all complaints, reply, change status | | | | | | | read only |
