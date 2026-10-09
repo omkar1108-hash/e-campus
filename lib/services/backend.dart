@@ -64,7 +64,38 @@ abstract class Backend {
 
   // ---- Chat -------------------------------------------------------------
   Stream<List<ChatMessage>> watchMessages(String chatId);
+
+  /// Sends a message and updates the conversation summary.
   Future<void> sendMessage(String chatId, ChatMessage message);
+
+  /// Sender only. Pass [isLast] when this is the newest message, so the
+  /// chat list preview stays correct.
+  Future<void> editMessage(
+    String chatId,
+    String messageId,
+    String text, {
+    bool isLast = false,
+  });
+
+  /// Sender only. The message stays as "This message was deleted".
+  Future<void> deleteMessage(
+    String chatId,
+    String messageId, {
+    bool isLast = false,
+  });
+
+  /// Either person in the chat may pin or unpin.
+  Future<void> setPinned(String chatId, String messageId, bool pinned);
+
+  /// Conversations [uid] takes part in (latest message of each).
+  Stream<List<ChatSummary>> watchChats(String uid);
+
+  /// When [uid] last opened each chat: chat id -> time.
+  Stream<Map<String, DateTime>> watchReadMarkers(String uid);
+
+  /// [at] defaults to now; the inbox passes the newest message's time so a
+  /// sender whose phone clock runs ahead cannot leave a chat looking unread.
+  Future<void> markRead(String uid, String chatId, {DateTime? at});
 
   // ---- Buses ------------------------------------------------------------
   /// Buses [viewer] may see: staff roles see all, students see buses

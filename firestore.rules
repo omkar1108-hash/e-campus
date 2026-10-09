@@ -84,11 +84,100 @@ service cloud.firestore {
                     || (canPostNews() && resource.data.department == profile().department);
     }
 
-    // ---- Chat: id is "<uidA>_<uidB>"; only participants may use it ------
+    // ---- Chat ----------------------------------------------------------
+    // Conversation id is "<uidA>_<uidB>" (sorted); only those two may use it.
+    function chatParts(chatId) { return chatId.split('_'); }
+    function inChat(chatId) {
+      return chatParts(chatId).size() == 2
+          && chatParts(chatId)[0] != chatParts(chatId)[1]
+          && request.auth.uid in chatParts(chatId);
+    }
+    function otherInChat(chatId) {
+      return chatParts(chatId)[0] == request.auth.uid
+          ? chatParts(chatId)[1] : chatParts(chatId)[0];
+    }
+    function isStudentRole(r) { return r in ['student', 'classRep']; }
+
+    // Students talk to all students and to teachers of their own department.
+    // Teachers talk to students of their department and to all staff.
+    // Staff talk to each other. Students cannot chat with other staff.
+    function mayChat(chatId) {
+      let other = get(/databases/$(database)/documents/users/$(otherInChat(chatId))).data;
+      let me = profile();
+      return other.get('active', true) == true && (
+        (isStudentRole(me.role) && isStudentRole(other.role))
+        || (isStudentRole(me.role) && other.role == 'teacher'
+            && other.department == me.department)
+        || (me.role == 'teacher' && isStudentRole(other.role)
+            && other.department == me.department)
+        || (!isStudentRole(me.role) && !isStudentRole(other.role)));
+    }
+
+    function validText(t) { return t is string && t.size() > 0 && t.size() <= 4000; }
+
     match /chats/{chatId}/messages/{msgId} {
-      allow read: if active() && request.auth.uid in chatId.split('_');
-      allow create: if active() && request.auth.uid in chatId.split('_')
-                    && request.resource.data.senderId == request.auth.uid;
+      allow read: if active() && inChat(chatId);
+
+      allow create: if active() && inChat(chatId) && mayChat(chatId)
+                    && request.resource.data.keys().hasOnly(
+                         ['senderId', 'text', 'sentAt', 'deleted', 'pinned'])
+                    && request.resource.data.senderId == request.auth.uid
+                    && request.resource.data.deleted == false
+                    && request.resource.data.pinned == false
+                    && validText(request.resource.data.text);
+
+      allow update: if active() && inChat(chatId)
+                    && resource.data.get('deleted', false) == false
+                    && (
+        // Either person pins or unpins.
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned'])
+         && request.resource.data.pinned is bool)
+        ||
+        // The sender edits their own message.
+        (resource.data.senderId == request.auth.uid
+         && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['text', 'editedAt'])
+         && validText(request.resource.data.text))
+        ||
+        // The sender deletes their own message (it stays as a stub).
+        (resource.data.senderId == request.auth.uid
+         && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['deleted', 'text', 'pinned'])
+         && request.resource.data.deleted == true
+         && request.resource.data.text == ''));
+
+      allow delete: if false;
+    }
+
+    // Latest message of a conversation: drives the chat list, unread dots
+    // and the "new message" banner.
+    function validSummary(chatId) {
+      return request.resource.data.keys().hasOnly(
+               ['participants', 'lastText', 'lastMessageAt', 'lastSenderId'])
+          && request.resource.data.participants == chatParts(chatId)
+          && request.resource.data.lastSenderId == request.auth.uid
+          && request.resource.data.lastText is string
+          && request.resource.data.lastText.size() <= 4000;
+    }
+
+    match /chats/{chatId} {
+      allow read: if active() && request.auth.uid in resource.data.participants;
+      allow create: if active() && inChat(chatId) && mayChat(chatId)
+                    && validSummary(chatId);
+      // Editing or deleting the newest message only changes its preview.
+      allow update: if active() && inChat(chatId) && validSummary(chatId)
+                    && (mayChat(chatId)
+                        || request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['lastText']));
+      allow delete: if false;
+    }
+
+    // When each person last opened each chat. Private to that person.
+    match /userState/{uid} {
+      allow read: if active() && request.auth.uid == uid;
+      allow create, update: if active() && request.auth.uid == uid
+                            && request.resource.data.keys().hasOnly(['readAt'])
+                            && request.resource.data.readAt is map;
     }
 
     // ---- Buses ---------------------------------------------------------

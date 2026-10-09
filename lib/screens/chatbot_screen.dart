@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/chatbot_service.dart';
+import '../widgets/link_text.dart';
 
 /// AI doubt-clearing assistant (Gemini API).
 class ChatbotScreen extends StatefulWidget {
@@ -108,7 +109,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                               : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: SelectableText(t.text),
+                        child: LinkText(t.text, selectable: true),
                       ),
                     );
                   },

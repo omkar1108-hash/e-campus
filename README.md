@@ -15,7 +15,7 @@ class representatives, teachers and administrators.
 | E-Library | Search, read/download books (link-based); teachers, library staff, admin staff and admin add and remove books |
 | Bus tracking | Several buses, each with a driver and the departments allowed to track it. Drivers **start / end a trip** and share their phone's GPS. Google Maps on Android / iOS, OpenStreetMap map on Windows, macOS, Linux and web |
 | Manage buses | Admin / admin staff add buses, assign a driver and choose the departments that can track each bus |
-| Chat | One-to-one chat (Cloud Firestore, real time) |
+| Chat | One-to-one, real time. **Edit** (15 min), **delete for everyone**, **pin** messages; **unread dots** and a drawer badge; a **banner** when a message arrives while the app is open (no push notifications while it is closed - that needs a paid Firebase plan); **department filter** on the people list; links in messages are clickable |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
 | Tech news | Class reps / teachers / admin staff / admin post; everyone but drivers reads their own department's news |
 
@@ -23,7 +23,7 @@ class representatives, teachers and administrators.
 
 | Capability | Student | Class Rep | Teacher | Library staff | Bus driver | Admin staff | Admin |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Chat | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Chat | all students + teachers of own dept | same | students of own dept + all staff | staff only | staff only | staff only | staff only |
 | Library, chatbot, read news | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
 | Post news (own department) | | ✔ | ✔ | | | ✔ | ✔ (any) |
 | Delete news | | own dept | own dept | | | any | any |

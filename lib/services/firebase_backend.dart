@@ -257,8 +257,11 @@ class FirebaseBackend implements Backend {
   Future<void> deleteNews(String id) => _db.collection('news').doc(id).delete();
 
   // ---- Chat -------------------------------------------------------------
+  DocumentReference<Map<String, dynamic>> _chat(String chatId) =>
+      _db.collection('chats').doc(chatId);
+
   CollectionReference<Map<String, dynamic>> _messages(String chatId) =>
-      _db.collection('chats').doc(chatId).collection('messages');
+      _chat(chatId).collection('messages');
 
   @override
   Stream<List<ChatMessage>> watchMessages(String chatId) => _messages(chatId)
@@ -268,9 +271,97 @@ class FirebaseBackend implements Backend {
         (s) => s.docs.map((d) => ChatMessage.fromMap(d.id, d.data())).toList(),
       );
 
+  Map<String, dynamic> _summary(
+    String chatId,
+    String text,
+    int at,
+    String sender,
+  ) => {
+    'participants': chatId.split('_'),
+    'lastText': text,
+    'lastMessageAt': at,
+    'lastSenderId': sender,
+  };
+
   @override
-  Future<void> sendMessage(String chatId, ChatMessage message) =>
-      _messages(chatId).add(message.toMap());
+  Future<void> sendMessage(String chatId, ChatMessage message) {
+    final batch = _db.batch();
+    batch.set(_messages(chatId).doc(), message.toMap());
+    batch.set(
+      _chat(chatId),
+      _summary(
+        chatId,
+        message.text,
+        message.sentAt.millisecondsSinceEpoch,
+        message.senderId,
+      ),
+    );
+    return batch.commit();
+  }
+
+  @override
+  Future<void> editMessage(
+    String chatId,
+    String messageId,
+    String text, {
+    bool isLast = false,
+  }) {
+    final batch = _db.batch();
+    batch.update(_messages(chatId).doc(messageId), {
+      'text': text,
+      'editedAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    if (isLast) batch.update(_chat(chatId), {'lastText': text});
+    return batch.commit();
+  }
+
+  @override
+  Future<void> deleteMessage(
+    String chatId,
+    String messageId, {
+    bool isLast = false,
+  }) {
+    final batch = _db.batch();
+    batch.update(_messages(chatId).doc(messageId), {
+      'deleted': true,
+      'text': '',
+      'pinned': false,
+    });
+    if (isLast) batch.update(_chat(chatId), {'lastText': 'Message deleted'});
+    return batch.commit();
+  }
+
+  @override
+  Future<void> setPinned(String chatId, String messageId, bool pinned) =>
+      _messages(chatId).doc(messageId).update({'pinned': pinned});
+
+  @override
+  Stream<List<ChatSummary>> watchChats(String uid) => _db
+      .collection('chats')
+      .where('participants', arrayContains: uid)
+      .snapshots()
+      .map(
+        (s) => s.docs.map((d) => ChatSummary.fromMap(d.id, d.data())).toList(),
+      );
+
+  DocumentReference<Map<String, dynamic>> _state(String uid) =>
+      _db.collection('userState').doc(uid);
+
+  @override
+  Stream<Map<String, DateTime>> watchReadMarkers(String uid) =>
+      _state(uid).snapshots().map((d) {
+        final raw = (d.data()?['readAt'] ?? const {}) as Map<String, dynamic>;
+        return {
+          for (final e in raw.entries)
+            e.key: DateTime.fromMillisecondsSinceEpoch(e.value as int),
+        };
+      });
+
+  @override
+  Future<void> markRead(String uid, String chatId, {DateTime? at}) =>
+      _state(uid).set({
+        'readAt': {chatId: (at ?? DateTime.now()).millisecondsSinceEpoch},
+      }, SetOptions(merge: true));
 
   // ---- Buses ------------------------------------------------------------
   CollectionReference<Map<String, dynamic>> get _buses =>
