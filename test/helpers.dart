@@ -45,6 +45,8 @@ Future<void> openDrawer(WidgetTester tester) async {
 
 Future<void> openMenuItem(WidgetTester tester, String title) async {
   await openDrawer(tester);
-  await tester.tap(find.text(title));
+  await tester.tap(
+    find.descendant(of: find.byType(Drawer), matching: find.text(title)),
+  );
   await tester.pumpAndSettle();
 }

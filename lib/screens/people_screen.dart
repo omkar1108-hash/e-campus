@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../services/backend.dart';
 import '../services/inbox_controller.dart';
 import '../utils/chat_policy.dart';
+import '../widgets/role_badge.dart';
 import 'chat_screen.dart';
 
 /// People you may chat with, newest conversation first. Unread chats are
@@ -122,11 +123,22 @@ class _PeopleScreenState extends State<PeopleScreen> {
                           leading: CircleAvatar(
                             child: Text(p.name.isEmpty ? '?' : p.name[0]),
                           ),
-                          title: Text(
-                            p.name,
-                            style: unread
-                                ? const TextStyle(fontWeight: FontWeight.bold)
-                                : null,
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  p.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: unread
+                                      ? const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              RoleBadge(p.role),
+                            ],
                           ),
                           subtitle: Text(
                             last == null

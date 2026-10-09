@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_user.dart';
+import '../widgets/role_badge.dart';
 import '../models/chat_message.dart';
 import '../services/backend.dart';
 import '../services/inbox_controller.dart';
@@ -228,9 +229,16 @@ class _ChatScreenState extends State<ChatScreen> {
           preferredSize: const Size.fromHeight(20),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '${widget.other.role.label} · ${widget.other.department}',
-              style: Theme.of(context).textTheme.labelMedium,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RoleBadge(widget.other.role),
+                const SizedBox(width: 8),
+                Text(
+                  widget.other.department,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ],
             ),
           ),
         ),

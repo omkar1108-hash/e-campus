@@ -35,11 +35,12 @@ service cloud.firestore {
                     && request.resource.data.active == true
                     && (
                       (isAdmin() && request.resource.data.role in
-                        ['admin', 'adminStaff', 'libraryStaff', 'teacher',
-                         'student', 'busDriver'])
+                        ['admin', 'adminStaff', 'grievanceCommittee', 'libraryStaff',
+                         'teacher', 'student', 'busDriver'])
                       ||
                       (isAdminStaff() && request.resource.data.role in
-                        ['libraryStaff', 'teacher', 'student', 'busDriver'])
+                        ['grievanceCommittee', 'libraryStaff', 'teacher',
+                         'student', 'busDriver'])
                     );
 
       allow update: if
@@ -56,7 +57,8 @@ service cloud.firestore {
                .hasOnly(['name', 'department', 'role', 'gender', 'active'])
           && (request.resource.data.role == resource.data.role
               || request.resource.data.role in
-                   ['student', 'classRep', 'teacher', 'libraryStaff', 'busDriver']))
+                   ['student', 'classRep', 'teacher', 'grievanceCommittee',
+                    'libraryStaff', 'busDriver']))
         ||
         // Teachers: only toggle student <-> class rep inside their own
         // department. (The 2 girls + 2 boys limit is enforced by the app.)
@@ -159,6 +161,226 @@ service cloud.firestore {
                     || (canPostNews() && resource.data.department == profile().department);
     }
 
+    // ---- Notices -------------------------------------------------------
+    // College-wide. Admin and admin staff post and delete. A notice marked
+    // public is also readable before sign-in (the opening page).
+    match /notices/{id} {
+      allow read: if resource.data.get('public', false) == true || notDriver();
+      allow create: if (isAdmin() || isAdminStaff())
+                    && request.resource.data.keys().hasOnly(
+                         ['title', 'body', 'authorName', 'createdAt', 'image', 'public'])
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() > 0
+                    && request.resource.data.title.size() <= 200
+                    && request.resource.data.body is string
+                    && request.resource.data.body.size() <= 4000
+                    && request.resource.data.public is bool
+                    && (!('image' in request.resource.data)
+                        || (request.resource.data.image is string
+                            && request.resource.data.image.size() <= 700000));
+      allow update: if false;
+      allow delete: if isAdmin() || isAdminStaff();
+    }
+
+    // ---- Emergency alerts ------------------------------------------------
+    // Only the administrator sends or clears an alert; every signed-in user,
+    // drivers included, can read it.
+    match /alerts/{id} {
+      allow read: if active();
+      allow create: if isAdmin()
+                    && request.resource.data.keys().hasOnly(
+                         ['message', 'authorName', 'createdAt', 'active'])
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() > 0
+                    && request.resource.data.message.size() <= 300
+                    && request.resource.data.active == true;
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['active', 'clearedAt'])
+                    && request.resource.data.active == false;
+      allow delete: if false;
+    }
+
+    // ---- Timetable -----------------------------------------------------
+    // One document per department, edited by admin staff / admin.
+    match /timetables/{department} {
+      allow read: if notDriver();
+      allow create, update: if (isAdmin() || isAdminStaff())
+                    && request.resource.data.keys().hasOnly(['slots', 'updatedAt'])
+                    && request.resource.data.slots is list
+                    && request.resource.data.slots.size() <= 200;
+      allow delete: if false;
+    }
+
+    // ---- Assignments & notes ---------------------------------------------
+    // Teachers post links; students read their own department's items.
+    match /assignments/{id} {
+      allow read: if active() && role() != 'busDriver'
+                  && (role() in ['admin', 'adminStaff']
+                      || resource.data.get('createdBy', '') == request.auth.uid
+                      || resource.data.get('department', '') == profile().department);
+      allow create: if isTeacher()
+                    && request.resource.data.keys().hasOnly(
+                         ['kind', 'department', 'subject', 'title', 'description',
+                          'link', 'dueDate', 'createdBy', 'createdByName', 'createdAt'])
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.kind in ['assignment', 'note']
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() > 0
+                    && request.resource.data.title.size() <= 200
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() <= 2000
+                    && request.resource.data.link is string
+                    && request.resource.data.link.size() <= 2000
+                    && request.resource.data.subject is string
+                    && request.resource.data.subject.size() <= 100;
+      allow update: if false;
+      allow delete: if isAdmin() || isAdminStaff()
+                    || (isTeacher() && resource.data.get('createdBy', '') == request.auth.uid);
+    }
+
+    // ---- Attendance ----------------------------------------------------
+    // One record per student, subject and day. Teachers write them; a
+    // student reads only their own. (The rules cannot check that the student
+    // belongs to the teacher's class - see the README.)
+    match /attendanceRecords/{id} {
+      allow read: if active()
+                  && (resource.data.studentUid == request.auth.uid
+                      || resource.data.teacherUid == request.auth.uid
+                      || role() in ['admin', 'adminStaff']);
+      allow create: if isTeacher()
+                    && request.resource.data.keys().hasOnly(
+                         ['studentUid', 'studentName', 'department', 'subject',
+                          'date', 'present', 'teacherUid'])
+                    && request.resource.data.teacherUid == request.auth.uid
+                    && request.resource.data.present is bool
+                    && request.resource.data.date is string
+                    && request.resource.data.date.size() == 10
+                    && request.resource.data.subject is string
+                    && request.resource.data.subject.size() > 0
+                    && request.resource.data.subject.size() <= 100;
+      // Correcting a mistake: only the teacher who marked it, only "present".
+      allow update: if isTeacher() && resource.data.teacherUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['present'])
+                    && request.resource.data.present is bool;
+      allow delete: if false;
+    }
+
+    // ---- Complaints ----------------------------------------------------
+    // A complaint is stored twice. `complaints` is what the committee sees
+    // (an anonymous one carries no name). `complaintIdentities` says who
+    // filed it and is readable only by that person and the administrator.
+    // Rules cannot hide single fields, hence two collections.
+    function isCommittee() { return active() && role() == 'grievanceCommittee'; }
+    function identityOf(id) {
+      return get(/databases/$(database)/documents/complaintIdentities/$(id)).data;
+    }
+    function isFiler(id) { return identityOf(id).filedBy == request.auth.uid; }
+    function complaintStatuses() { return ['submitted', 'inReview', 'resolved', 'rejected']; }
+    function validStatusChange() {
+      let from = resource.data.get('status', 'submitted');
+      let to = request.resource.data.status;
+      return (from == 'submitted' && to in ['inReview', 'resolved', 'rejected'])
+          || (from == 'inReview' && to in ['resolved', 'rejected']);
+    }
+    function statusOnlyChange() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'updatedAt'])
+          && request.resource.data.updatedAt is number
+          && validStatusChange();
+    }
+
+    match /complaintIdentities/{id} {
+      allow read: if active()
+                  && (resource.data.filedBy == request.auth.uid || isAdmin());
+      allow create: if active() && !isCommittee()
+                    && request.resource.data.keys().hasOnly(
+                         ['filedBy', 'filedByName', 'filedByDepartment', 'anonymous',
+                          'category', 'subject', 'status', 'createdAt', 'updatedAt'])
+                    && request.resource.data.filedBy == request.auth.uid
+                    && request.resource.data.status == 'submitted'
+                    && request.resource.data.anonymous is bool
+                    && existsAfter(/databases/$(database)/documents/complaints/$(id));
+      // Only the status mirror changes, and only the committee changes it.
+      allow update: if isCommittee() && statusOnlyChange();
+      allow delete: if false;
+    }
+
+    match /complaints/{id} {
+      allow read: if active()
+                  && (role() in ['grievanceCommittee', 'admin'] || isFiler(id));
+      allow create: if active() && !isCommittee()
+                    && request.resource.data.keys().hasOnly(
+                         ['category', 'subject', 'description', 'anonymous',
+                          'displayName', 'displayDepartment', 'status',
+                          'createdAt', 'updatedAt'])
+                    && request.resource.data.status == 'submitted'
+                    && request.resource.data.subject is string
+                    && request.resource.data.subject.size() > 0
+                    && request.resource.data.subject.size() <= 120
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() > 0
+                    && request.resource.data.description.size() <= 4000
+                    && request.resource.data.anonymous is bool
+                    && getAfter(/databases/$(database)/documents/complaintIdentities/$(id))
+                         .data.filedBy == request.auth.uid
+                    && getAfter(/databases/$(database)/documents/complaintIdentities/$(id))
+                         .data.anonymous == request.resource.data.anonymous
+                    && (request.resource.data.anonymous
+                        ? (request.resource.data.displayName == 'Anonymous'
+                           && request.resource.data.displayDepartment == '')
+                        : (request.resource.data.displayName == profile().name
+                           && request.resource.data.displayDepartment
+                                == profile().department));
+      allow update: if isCommittee() && statusOnlyChange();
+      allow delete: if false;
+
+      match /replies/{rid} {
+        allow read: if active()
+                    && (role() in ['grievanceCommittee', 'admin'] || isFiler(id));
+        allow create: if active()
+                      && request.resource.data.keys().hasOnly(
+                           ['kind', 'byCommittee', 'authorName', 'text', 'createdAt'])
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 2000
+                      && request.resource.data.authorName is string
+                      && request.resource.data.authorName.size() <= 100
+                      && (
+                        (isCommittee() && request.resource.data.byCommittee == true
+                         && request.resource.data.kind in ['reply', 'status'])
+                        ||
+                        (!isCommittee() && isFiler(id)
+                         && request.resource.data.byCommittee == false
+                         && request.resource.data.kind == 'reply'
+                         && get(/databases/$(database)/documents/complaints/$(id))
+                              .data.status in ['submitted', 'inReview'])
+                      );
+        allow update, delete: if false;
+      }
+    }
+
+    // ---- Activity log --------------------------------------------------
+    // Written by the app on the actor's behalf (so it is a convenience
+    // record, not tamper-proof) and readable by the administrator only.
+    match /activityLog/{id} {
+      allow read: if isAdmin();
+      allow create: if active()
+                    && request.resource.data.keys().hasOnly(
+                         ['action', 'actorUid', 'actorName', 'actorRole',
+                          'targetType', 'targetLabel', 'details', 'createdAt'])
+                    && request.resource.data.actorUid == request.auth.uid
+                    && request.resource.data.actorRole == role()
+                    && request.resource.data.action is string
+                    && request.resource.data.action.size() <= 40
+                    && request.resource.data.targetLabel is string
+                    && request.resource.data.targetLabel.size() <= 200
+                    && request.resource.data.details is string
+                    && request.resource.data.details.size() <= 200;
+      allow update, delete: if false;
+    }
+
     // ---- Chat ----------------------------------------------------------
     // Conversation id is "<uidA>_<uidB>" (sorted); only those two may use it.
     function chatParts(chatId) { return chatId.split('_'); }
@@ -259,7 +481,8 @@ service cloud.firestore {
     // Configuration (name, plate, driver, departments) is written by admin /
     // admin staff; live trip fields only by the assigned driver.
     function canTrackAnyBus() {
-      return active() && role() in ['admin', 'adminStaff', 'teacher', 'libraryStaff'];
+      return active() && role() in ['admin', 'adminStaff', 'teacher', 'libraryStaff',
+                                  'grievanceCommittee'];
     }
 
     match /buses/{id} {

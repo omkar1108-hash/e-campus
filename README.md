@@ -8,7 +8,7 @@ class representatives, teachers and administrators.
 | Feature | Details |
 |---|---|
 | Email login | Firebase email + password. Accounts are **created by administrators** (no self sign-up). The new person gets a verification email and a "set your password" email |
-| Seven roles | `student`, `classRep`, `teacher`, `libraryStaff`, `busDriver`, `adminStaff`, `admin`. Rules live in `lib/utils/rbac.dart` and are enforced server-side in `firestore.rules` |
+| Eight roles | `student`, `classRep`, `teacher`, `libraryStaff`, `busDriver`, `adminStaff`, `grievanceCommittee`, `admin`. Rules live in `lib/utils/rbac.dart` and are enforced server-side in `firestore.rules` |
 | Role-aware drawer | Menu entries are generated from the user's role |
 | Account management | Admin / admin staff create, edit and **disable** accounts (Manage Users). Disabled people cannot sign in |
 | Class representatives | Teachers pick them for their own department: at most 2 girls and 2 boys |
@@ -18,6 +18,17 @@ class representatives, teachers and administrators.
 | Chat | One-to-one, real time. **Edit** (15 min), **delete for everyone**, **pin** messages; **unread dots** and a drawer badge; a **banner** when a message arrives while the app is open (no push notifications while it is closed - that needs a paid Firebase plan); **department filter** on the people list; links in messages are clickable |
 | AI chatbot | Doubt-clearing assistant using the Google Gemini API |
 | Tech news | Class reps / teachers / admin staff / admin post, optionally with a **poster picture** from the gallery; everyone but drivers reads their own department's news |
+| Opening page | The screen before sign-in: college name and contacts (`lib/config/app_config.dart`), the sign-in form, what the app offers and any **public notices**. Two columns on desktop |
+| Dashboard | Live cards per role: unread messages, notices, today's classes, assignments due, attendance %, books to verify, bus status, account counts, new complaints, activity... Each card opens its section |
+| Notices | College-wide announcements by admin / admin staff, optionally with a poster and optionally **public** (shown on the opening page) |
+| Timetable | One weekly timetable per department, edited by admin staff / admin. Teachers also get **My classes** across departments |
+| Attendance | Teachers mark a lecture (department, subject, date) and can correct it later; students see their percentage per subject and overall, with a warning under 75% |
+| Assignments & notes | Teachers share assignments (with due date) and notes as **links** (Drive, OneDrive...); students see their department's items |
+| Complaints | Anyone except the committee files a complaint (category, subject, details), **optionally anonymous**. The **Grievance Committee** account reads them, replies and moves them through *Submitted -> In review -> Resolved / Rejected*. The filer follows the status and can answer while it is open. The **administrator** can see who filed an anonymous complaint; the committee cannot |
+| Role badges | Coloured role label next to every name in the chat list and chat header |
+| Search | One search box across e-library books, department news and notices |
+| Activity log | Admin only: who created, edited, disabled or re-enabled accounts, who deleted or reviewed books, deleted news / notices / buses, changed a complaint's status, sent or cleared an alert |
+| Emergency alert | The administrator sends a message; every signed-in user (drivers too) gets a red banner and a one-time pop-up. In-app only, no push notification |
 
 ### Permission matrix
 
@@ -35,7 +46,19 @@ class representatives, teachers and administrators.
 | Add buses, assign drivers / departments | | | | | | ✔ | ✔ |
 | Choose class reps (own dept) | | | ✔ | | | | |
 | Create / edit / disable accounts | | | | | | all but admins | all but self |
-| Create accounts of role | | | | | | library, teacher, student, driver | any except class rep |
+| Create accounts of role | | | | | | committee, library, teacher, student, driver | any except class rep |
+| Notices: read | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
+| Notices: post / delete | | | | | | ✔ | ✔ |
+| Timetable: view | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
+| Timetable: edit | | | | | | ✔ | ✔ |
+| Mark attendance / post assignments | | | ✔ | | | | |
+| See own attendance | ✔ | ✔ | | | | | |
+| File a complaint | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Read all complaints, reply, change status | | | | | | | read only |
+| Grievance Committee: all complaints, reply, change status | (committee role) | | | | | | |
+| See who filed an anonymous complaint | | | | | | | ✔ |
+| Search | ✔ | ✔ | ✔ | ✔ | | ✔ | ✔ |
+| Send emergency alert, read the activity log | | | | | | | ✔ |
 
 ## Run it right now (demo mode)
 
@@ -48,8 +71,8 @@ flutter run
 ```
 
 Demo accounts (password `demo1234`): `admin@`, `staff@`, `library@`,
-`teacher@`, `rep@`, `student@`, `student2@`, `student3@`, `driver@`
-`ecampus.demo`. Accounts created inside the demo are active immediately.
+`teacher@`, `rep@`, `student@`, `student2@`, `student3@`, `driver@`,
+`committee@` `ecampus.demo` (`meena@` is an MBA student, `iyer@` an MBA teacher). Accounts created inside the demo are active immediately.
 
 ## Production setup (Firebase, Maps, Gemini)
 
@@ -63,7 +86,8 @@ Demo accounts (password `demo1234`): `admin@`, `staff@`, `library@`,
      *Firestore -> users* create a document named with that user's UID and the
      fields `email`, `name`, `department` (strings), `role` = `admin` and
      `active` = `true` (boolean). Everyone else is created from the app
-     (*Manage Users -> Create account*).
+     (*Manage Users -> Create account*). Create one person with the role
+     **Grievance Committee** to handle complaints.
 2. **Google Maps** – enable *Maps SDK for Android*, then put the key in
    `android/local.properties`:
    `MAPS_API_KEY=your_key`
@@ -77,7 +101,9 @@ lib/
   main.dart                 Picks Firebase or demo backend
   app.dart                  Providers, theme, auth gate
   config/app_config.dart    Departments, Gemini settings
-  models/                   AppUser (+roles), Book, NewsItem, ChatMessage, Bus
+  models/                   AppUser (+roles), Book, NewsItem, ChatMessage, Bus,
+                            campus.dart (notices, alerts, timetable, assignments,
+                            attendance, complaints, activity log)
   services/
     backend.dart            Data-source interface
     firebase_backend.dart   Firebase Auth + Firestore implementation
@@ -85,7 +111,9 @@ lib/
     auth_controller.dart    Sign-in / sign-up state
     chatbot_service.dart    Gemini API client
   screens/                  login, otp, register, home (drawer), dashboard,
-                            library, bus (+ manage buses), people, chat, chatbot, news, manage users
+                            library, bus (+ manage buses), people, chat, chatbot, news, manage users,
+                            notices, timetable, attendance, assignments, complaints,
+                            search, alert, activity log
   utils/rbac.dart           Permission rules
 firestore.rules             Server-side RBAC
 firestore_tests/            Rules tests (Firebase emulator): `cd firestore_tests && npm install && npm test`
@@ -108,3 +136,21 @@ very detailed pictures are refused with a message. Books added before the
 approval flow existed need a one-time **"Approve books added before this
 update"** (Library -> the menu next to the search box, as library staff, admin
 staff or admin).
+
+## Limits you should know about
+
+- **Activity log** entries are written by the app on the person's behalf and
+  the rules only check that someone logs as themselves, so it is a convenient
+  record rather than tamper-proof evidence. A tamper-proof log needs Cloud
+  Functions (paid Blaze plan).
+- **Anonymous complaints** are kept anonymous from the committee by storing
+  the filer's identity in a separate collection (`complaintIdentities`) that
+  only the filer and the administrator can read. The administrator can always
+  see who filed it - say so to students (the app does).
+- **Attendance**: the rules make sure only teachers write records and that
+  they are marked as that teacher, but they cannot check that a student really
+  belongs to that teacher's class (Firestore rules can read only a few
+  documents per request).
+- **Emergency alerts** and chat banners appear only while the app is open;
+  there are no push notifications on the free plan.
+- The college address, phone and email on the opening page are placeholders.
