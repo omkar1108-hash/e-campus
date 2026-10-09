@@ -98,8 +98,9 @@ class DashboardScreen extends StatelessWidget {
           title: Rbac.isStudent(u) ? 'Assignments due' : 'Shared by you',
           stream: () => backend.watchAssignments(u),
           map: (l) {
-            if (!Rbac.isStudent(u))
+            if (!Rbac.isStudent(u)) {
               return ('${l.length}', 'assignments and notes');
+            }
             final due =
                 l
                     .where(

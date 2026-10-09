@@ -171,8 +171,9 @@ class _PostDialogState extends State<_PostDialog> {
       firstDate: now,
       lastDate: now.add(const Duration(days: 365)),
     );
-    if (d != null)
+    if (d != null) {
       setState(() => _due = DateTime(d.year, d.month, d.day, 23, 59));
+    }
   }
 
   @override

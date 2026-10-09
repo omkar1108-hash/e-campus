@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -52,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final InboxController _inbox;
   StreamSubscription<IncomingMessage>? _incomingSub;
   Timer? _bannerTimer;
+  DateTime? _lastBack;
   StreamSubscription<List<EmergencyAlert>>? _alertSub;
   List<EmergencyAlert> _alerts = const [];
 
@@ -286,17 +288,44 @@ class _HomeScreenState extends State<HomeScreen> {
     final index = _selected.clamp(0, items.length - 1);
     final current = items[index];
 
-    return ChangeNotifierProvider<InboxController>.value(
-      value: _inbox,
-      child: Consumer<InboxController>(
-        builder: (context, inbox, _) => _buildScaffold(
-          context,
-          auth,
-          user,
-          items,
-          index,
-          current,
-          inbox.unreadCount,
+    // Back from any section returns to the dashboard; back on the
+    // dashboard needs a second press within 2 seconds to leave the app.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (index != 0) {
+          setState(() => _selected = 0);
+          return;
+        }
+        final now = DateTime.now();
+        final last = _lastBack;
+        if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+          SystemNavigator.pop();
+          return;
+        }
+        _lastBack = now;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Press back again to exit'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+      },
+      child: ChangeNotifierProvider<InboxController>.value(
+        value: _inbox,
+        child: Consumer<InboxController>(
+          builder: (context, inbox, _) => _buildScaffold(
+            context,
+            auth,
+            user,
+            items,
+            index,
+            current,
+            inbox.unreadCount,
+          ),
         ),
       ),
     );
